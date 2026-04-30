@@ -1,8 +1,6 @@
 # grading-cloud
 
-A cloud-native AI-powered grading pipeline built on AWS, designed to automate the correction, harmonization, and reporting of student work at scale.
-
-This project ports a local Python script into a production-grade distributed system, demonstrating domain-driven design, hexagonal architecture, event-driven async processing, and infrastructure as code — end to end.
+A cloud-native AI-powered grading pipeline built on AWS, designed to automate the correction, harmonization, and reporting of student work at scale. Demonstrates domain-driven design, hexagonal architecture, event-driven async processing, and infrastructure as code — end to end.
 
 ---
 
@@ -229,8 +227,3 @@ Development is tracked in [GitHub Issues](https://github.com/BrunFlorimond/gradi
 
 Full board: [Grading Cloud – Roadmap](https://github.com/users/BrunFlorimond/projects/2)
 
----
-
-## Local Origin
-
-This project is a cloud port of a working local Python pipeline. The original script handles the same five stages (conversion, correction, harmonization, LaTeX rendering, PDF compilation) as a CLI tool run by a single teacher on their machine. The cloud version makes it multi-user, async, scalable, and accessible to students — while preserving the domain logic exactly.

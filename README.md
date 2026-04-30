@@ -126,7 +126,7 @@ Anthropic Batch jobs can take up to 24 hours. Lambda's maximum timeout is 15 min
 
 ### Why WeasyPrint — not LaTeX
 
-The original local script used LaTeX + latexmk for PDF generation. A full TeX Live installation is 3–4 GB — impractical for a Lambda container. The PDF generator Lambda uses WeasyPrint (HTML → PDF) with a Jinja2 template and matplotlib (Agg backend) for the grade distribution histogram, resulting in a ~150 MB container image with no system-level TeX dependency.
+A full TeX Live installation weighs 3–4 GB — impractical for a Lambda container image. The PDF generator Lambda uses WeasyPrint (HTML → PDF) with a Jinja2 template and matplotlib (Agg backend) for the grade distribution histogram, resulting in a ~150 MB container image with no system-level TeX dependency.
 
 ---
 
@@ -216,14 +216,16 @@ grading-cloud/
 
 ## Roadmap
 
-Development is tracked in [GitHub Issues](https://github.com/BrunFlorimond/grading-cloud/issues) organized across four milestones:
+Backend and frontend are developed in parallel vertical slices — each slice delivers a demoable feature end to end. Backend issues are tracked here; frontend issues live in [grading-cloud-web](https://github.com/BrunFlorimond/grading-cloud-web). Both feed into the same project board.
 
-| Milestone | Scope |
-|---|---|
-| [Phase 1 – Foundation & Auth](https://github.com/BrunFlorimond/grading-cloud/milestone/1) | CDK stacks, shared package, CI/CD, Cognito, RBAC |
-| [Phase 2 – Core Pipeline](https://github.com/BrunFlorimond/grading-cloud/milestone/2) | Exam management, ingestion, AI correction, harmonization, PDF generation |
-| [Phase 3 – Student Portal](https://github.com/BrunFlorimond/grading-cloud/milestone/3) | Student dashboard, grade view, PDF download, email notifications |
-| [Phase 4 – Rubric Builder](https://github.com/BrunFlorimond/grading-cloud/milestone/4) | AI-assisted rubric generation, versioning, exam attachment |
+| Slice | Backend scope | Demo at the end |
+|---|---|---|
+| [Slice 1 – Exam Setup](https://github.com/BrunFlorimond/grading-cloud/milestone/5) | CDK skeleton, shared package, CI/CD, Cognito, RBAC, exam CRUD | Create an exam, configure it, add students — full auth + API flow |
+| [Slice 2 – Spreadsheet Ingestion](https://github.com/BrunFlorimond/grading-cloud/milestone/6) | SQS, converter Lambda, upload/confirm endpoints | Upload a spreadsheet, see it converted to JSON |
+| [Slice 3 – AI Correction](https://github.com/BrunFlorimond/grading-cloud/milestone/7) | Pipeline trigger, event consumer, Anthropic Batch correction, batch poller | Trigger grading, watch per-student corrections appear |
+| [Slice 4 – Full Pipeline](https://github.com/BrunFlorimond/grading-cloud/milestone/8) | Harmonization, cohort stats, PDF Lambda, download endpoints | Spreadsheet in → graded PDF out, downloadable |
+| [Slice 5 – Student Portal](https://github.com/BrunFlorimond/grading-cloud/milestone/9) | Student-scoped endpoints, SES notifications | Student logs in, views their grade, downloads their PDF |
+| [Slice 6 – Rubric Builder](https://github.com/BrunFlorimond/grading-cloud/milestone/10) | xlsx upload, conversion, Claude rubric generation, versioning, exam attachment | Generate a rubric from an xlsx assignment, attach it to an exam |
 
 Full board: [Grading Cloud – Roadmap](https://github.com/users/BrunFlorimond/projects/2)
 

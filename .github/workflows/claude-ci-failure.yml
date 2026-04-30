@@ -1,0 +1,53 @@
+name: Claude CI Failure Analysis
+
+on:
+  workflow_run:
+    workflows: ["Tests", "Lint"]
+    types: [completed]
+    branches-ignore: [main]
+
+jobs:
+  analyze:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download failed CI logs and find PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 \
+            | head -c 8000 > /tmp/ci_failure.log \
+            || echo "Logs indisponibles" > /tmp/ci_failure.log
+
+          PR=$(gh pr list \
+            --head "${{ github.event.workflow_run.head_branch }}" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty' 2>/dev/null || echo "")
+          echo "${PR:-}" > /tmp/pr_number.txt
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Le workflow CI "${{ github.event.workflow_run.name }}" a échoué
+            sur la branche ${{ github.event.workflow_run.head_branch }}.
+
+            1. Lis /tmp/ci_failure.log — logs d'erreur du run échoué
+            2. Identifie la cause racine (fichier + ligne si possible)
+            3. Propose un fix minimal (moins de 10 lignes)
+            4. Indique : problème de code, de config, ou de test ?
+            5. Lis /tmp/pr_number.txt. Si non vide, poste l'analyse avec :
+               gh pr comment {numéro} --body "## CI Failure Analysis\n\n{ton analyse}"
+
+            Ne modifie aucun fichier source.

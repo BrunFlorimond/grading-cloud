@@ -1,0 +1,43 @@
+name: Claude Issue Scaffold
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  scaffold:
+    if: github.event.label.name == 'ai-scaffold'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write issue context
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: printf '%s' "$BODY" > /tmp/issue_body.txt
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Issue #${{ github.event.issue.number }} : ${{ github.event.issue.title }}
+            Lis /tmp/issue_body.txt pour la description complète.
+
+            Ta mission :
+            1. Lis CLAUDE.md pour les conventions du projet
+            2. Analyse le code existant pour trouver les patterns à suivre
+            3. Crée la branche feature/issue-${{ github.event.issue.number }}-{slug}
+            4. Génère des stubs avec TODOs uniquement — pas d'implémentation complète
+               Ordre : domain → ports → application → infrastructure → api
+            5. Ajoute un fichier tests/ vide listant les cas à implémenter
+            6. Ouvre une draft PR "Closes #${{ github.event.issue.number }}"
+            7. Retire le label de l'issue :
+               gh issue edit ${{ github.event.issue.number }} --remove-label "ai-scaffold"
+
+            Suis exactement les patterns des fichiers existants dans le même service.

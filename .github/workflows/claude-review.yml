@@ -1,0 +1,41 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.github/**'
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Tu es un tech lead senior qui review une PR sur un projet
+            Python/FastAPI avec architecture hexagonale sur AWS.
+
+            Analyse dans l'ordre de priorité :
+            1. Violations architecture hexagonale (import boto3 dans domain/ ?)
+            2. Sécurité : credentials exposés, IAM trop large, injection
+            3. Correctness : logique métier, edge cases non gérés
+            4. Performance DynamoDB : scan full-table, N+1
+            5. Tests manquants ou insuffisants
+            6. Conformité Pydantic v2 (extra="forbid", strict=True)
+
+            Format : [CRITIQUE|MAJEUR|MINEUR] + fichier:ligne + fix en 2 lignes.
+            Sois bref. Pas de félicitations.

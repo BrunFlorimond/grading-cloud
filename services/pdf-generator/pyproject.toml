@@ -1,0 +1,13 @@
+[project]
+name = "pdf-generator"
+version = "0.1.0"
+description = "Lambda service generating PDF reports from grading data."
+requires-python = ">=3.12"
+dependencies = ["grading_shared"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+grading_shared = { workspace = true }

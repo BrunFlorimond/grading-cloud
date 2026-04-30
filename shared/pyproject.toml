@@ -1,0 +1,10 @@
+[project]
+name = "grading_shared"
+version = "0.1.0"
+description = "Shared domain models and ports for grading-cloud services."
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

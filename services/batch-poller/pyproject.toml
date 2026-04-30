@@ -1,0 +1,13 @@
+[project]
+name = "batch-poller"
+version = "0.1.0"
+description = "Lambda service polling Anthropic batch processing status."
+requires-python = ">=3.12"
+dependencies = ["grading_shared"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+grading_shared = { workspace = true }

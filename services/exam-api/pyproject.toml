@@ -1,0 +1,13 @@
+[project]
+name = "exam-api"
+version = "0.1.0"
+description = "FastAPI orchestration service for grading-cloud."
+requires-python = ">=3.12"
+dependencies = ["grading_shared"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+grading_shared = { workspace = true }

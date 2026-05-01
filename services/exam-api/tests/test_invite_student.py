@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import base64
-import json
 from unittest.mock import Mock
 
 import pytest
 from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from grading_shared.domain.exam import Exam, ExamStatus
+from jose import JWTError
 
 from exam_api.api.invite_router import (
+    CurrentTeacher,
+    get_current_teacher,
     provide_invite_use_case,
     router,
 )
@@ -33,23 +35,13 @@ def _make_client_error(code: str, message: str) -> ClientError:
     )
 
 
-def _build_teacher_token(*, teacher_id: str, role: str = "teacher") -> str:
-    header = {"alg": "none", "typ": "JWT"}
-    payload = {"sub": teacher_id, "custom:role": role}
-    header_segment = base64.urlsafe_b64encode(
-        json.dumps(header, separators=(",", ":")).encode("utf-8")
-    ).decode("utf-8").rstrip("=")
-    payload_segment = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    ).decode("utf-8").rstrip("=")
-    return f"{header_segment}.{payload_segment}."
-
-
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
-    app.state.student_invite_service = Mock()
+    app.state.student_invite_service = Mock(spec=["invite_student"])
+    app.state.invite_repository = Mock()
+    app.state.jwt_verifier = Mock(spec=["decode_teacher_token"])
     test_client = TestClient(app)
     try:
         yield test_client
@@ -57,14 +49,39 @@ def client() -> TestClient:
         app.dependency_overrides.clear()
 
 
+def _build_use_case(
+    *,
+    invite_service: Mock | None = None,
+    exam_repository: Mock | None = None,
+    student_scope_repository: Mock | None = None,
+) -> InviteStudentUseCase:
+    return InviteStudentUseCase(
+        invite_service=invite_service or Mock(),
+        exam_repository=exam_repository or Mock(),
+        student_scope_repository=student_scope_repository or Mock(),
+    )
+
+
 def test_use_case_returns_new_invite_result() -> None:
     invite_service = Mock()
+    exam_repository = Mock()
+    exam_repository.get_exam.return_value = Exam(
+        exam_id="exam-1",
+        teacher_id="teacher-1",
+        title="Math Midterm",
+        status=ExamStatus.DRAFT,
+    )
+    student_scope_repository = Mock()
     invite_service.invite_student.return_value = PortInviteStudentResult(
         cognito_sub="student-sub-123",
         temporary_password="TemporaryPassword123!",
         already_existed=False,
     )
-    use_case = InviteStudentUseCase(invite_service=invite_service)
+    use_case = _build_use_case(
+        invite_service=invite_service,
+        exam_repository=exam_repository,
+        student_scope_repository=student_scope_repository,
+    )
 
     result = use_case.execute(
         InviteStudentCommand(
@@ -87,16 +104,24 @@ def test_use_case_returns_new_invite_result() -> None:
         student_email="student@example.com",
         exam_id="exam-1",
     )
+    student_scope_repository.upsert_student_scope.assert_called_once()
 
 
 def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     invite_service = Mock()
+    exam_repository = Mock()
+    exam_repository.get_exam.return_value = Exam(
+        exam_id="exam-1",
+        teacher_id="teacher-1",
+        title="Math Midterm",
+        status=ExamStatus.DRAFT,
+    )
     invite_service.invite_student.return_value = PortInviteStudentResult(
         cognito_sub="student-sub-existing",
         temporary_password="TemporaryPassword123!",
         already_existed=True,
     )
-    use_case = InviteStudentUseCase(invite_service=invite_service)
+    use_case = _build_use_case(invite_service=invite_service, exam_repository=exam_repository)
 
     result = use_case.execute(
         InviteStudentCommand(
@@ -109,6 +134,43 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
 
     assert result.re_invited is True
     assert result.student.student_id == "student-sub-existing"
+
+
+def test_use_case_raises_exam_not_found() -> None:
+    exam_repository = Mock()
+    exam_repository.get_exam.return_value = None
+    use_case = _build_use_case(exam_repository=exam_repository)
+
+    with pytest.raises(ExamNotFoundError):
+        use_case.execute(
+            InviteStudentCommand(
+                exam_id="exam-missing",
+                student_id="student-external-id",
+                student_email="student@example.com",
+                teacher_id="teacher-1",
+            )
+        )
+
+
+def test_use_case_raises_exam_ownership_error() -> None:
+    exam_repository = Mock()
+    exam_repository.get_exam.return_value = Exam(
+        exam_id="exam-1",
+        teacher_id="teacher-owner",
+        title="Math Midterm",
+        status=ExamStatus.DRAFT,
+    )
+    use_case = _build_use_case(exam_repository=exam_repository)
+
+    with pytest.raises(ExamOwnershipError):
+        use_case.execute(
+            InviteStudentCommand(
+                exam_id="exam-1",
+                student_id="student-external-id",
+                student_email="student@example.com",
+                teacher_id="teacher-other",
+            )
+        )
 
 
 def test_adapter_creates_cognito_user_and_sends_email() -> None:
@@ -155,7 +217,7 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
         "Already exists",
     )
     cognito.admin_get_user.return_value = {
-        "Attributes": [{"Name": "sub", "Value": "existing-sub"}]
+        "UserAttributes": [{"Name": "sub", "Value": "existing-sub"}]
     }
     adapter = CognitoSesStudentInviteAdapter(
         user_pool_id="pool-id",
@@ -184,11 +246,13 @@ def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
         re_invited=False,
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
 
     response = client.post(
         "/exams/exam-1/students/student-1/invite",
         json={"student_email": "student@example.com"},
-        headers={"Authorization": f"Bearer {_build_teacher_token(teacher_id='teacher-1')}"},
     )
 
     assert response.status_code == 200
@@ -212,11 +276,13 @@ def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
         re_invited=True,
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
 
     response = client.post(
         "/exams/exam-1/students/student-1/invite",
         json={"student_email": "student@example.com"},
-        headers={"Authorization": f"Bearer {_build_teacher_token(teacher_id='teacher-1')}"},
     )
 
     assert response.status_code == 200
@@ -227,11 +293,13 @@ def test_api_returns_404_when_exam_not_found(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute.side_effect = ExamNotFoundError("exam not found")
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
 
     response = client.post(
         "/exams/exam-404/students/student-1/invite",
         json={"student_email": "student@example.com"},
-        headers={"Authorization": f"Bearer {_build_teacher_token(teacher_id='teacher-1')}"},
     )
 
     assert response.status_code == 404
@@ -242,27 +310,46 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
     mock_use_case = Mock()
     mock_use_case.execute.side_effect = ExamOwnershipError("forbidden")
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
 
     response = client.post(
         "/exams/exam-1/students/student-1/invite",
         json={"student_email": "student@example.com"},
-        headers={"Authorization": f"Bearer {_build_teacher_token(teacher_id='teacher-1')}"},
     )
 
     assert response.status_code == 403
     assert response.json()["detail"] == "forbidden"
 
 
-def test_api_returns_403_for_non_teacher_role(client: TestClient) -> None:
+def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     mock_use_case = Mock()
+    client.app.state.jwt_verifier.decode_teacher_token.side_effect = JWTError("invalid token")
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
 
     response = client.post(
         "/exams/exam-1/students/student-1/invite",
         json={"student_email": "student@example.com"},
-        headers={
-            "Authorization": f"Bearer {_build_teacher_token(teacher_id='student-1', role='student')}"
-        },
+        headers={"Authorization": "Bearer invalid.token.value"},
+    )
+
+    assert response.status_code == 401
+    mock_use_case.execute.assert_not_called()
+
+
+def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
+    mock_use_case = Mock()
+    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+        "sub": "teacher-1",
+        "custom:role": "student",
+    }
+    client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+
+    response = client.post(
+        "/exams/exam-1/students/student-1/invite",
+        json={"student_email": "student@example.com"},
+        headers={"Authorization": "Bearer valid.token.value"},
     )
 
     assert response.status_code == 403

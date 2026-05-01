@@ -128,7 +128,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
 
     @staticmethod
     def _extract_user_sub(user_payload: dict[str, Any], student_email: str) -> str:
-        attributes = user_payload.get("Attributes", [])
+        attributes = user_payload.get("UserAttributes") or user_payload.get("Attributes", [])
         if not isinstance(attributes, list):
             raise RuntimeError(
                 f"Cognito response for {student_email} does not contain valid attributes."

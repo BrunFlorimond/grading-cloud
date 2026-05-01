@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Annotated
 
+from grading_shared.ports import ExamRepositoryPort
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from httpx import HTTPError
+from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr
 
-from exam_api.application.invite_student import InviteStudentCommand, InviteStudentUseCase
+from exam_api.application.invite_student import (
+    InviteStudentCommand,
+    InviteStudentUseCase,
+    StudentScopeRepositoryPort,
+)
 from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
 router = APIRouter(prefix="/exams", tags=["invite"])
@@ -38,6 +44,7 @@ class CurrentTeacher(BaseModel):
 
 
 def get_current_teacher(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentTeacher:
     if not authorization:
@@ -51,7 +58,14 @@ def get_current_teacher(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header must use Bearer token.",
         )
-    claims = _decode_jwt_payload(token)
+    jwt_verifier = get_jwt_verifier(request)
+    try:
+        claims = jwt_verifier.decode_teacher_token(token)
+    except (HTTPError, JWTError) as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid JWT token.",
+        ) from err
     role = claims.get("custom:role")
     teacher_id = claims.get("sub")
     if role != "teacher":
@@ -67,37 +81,6 @@ def get_current_teacher(
     return CurrentTeacher(teacher_id=teacher_id)
 
 
-def _decode_jwt_payload(token: str) -> dict[str, str]:
-    token_parts = token.split(".")
-    if len(token_parts) != 3:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid JWT token format.",
-        )
-    payload_segment = token_parts[1]
-    missing_padding = len(payload_segment) % 4
-    if missing_padding:
-        payload_segment += "=" * (4 - missing_padding)
-    try:
-        decoded = base64.urlsafe_b64decode(payload_segment.encode("utf-8"))
-        raw_payload = json.loads(decoded.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to decode JWT payload.",
-        ) from err
-    if not isinstance(raw_payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid JWT payload.",
-        )
-    claims: dict[str, str] = {}
-    for key, value in raw_payload.items():
-        if isinstance(key, str) and isinstance(value, str):
-            claims[key] = value
-    return claims
-
-
 def get_student_invite_service(request: Request) -> StudentInviteServicePort:
     service = getattr(request.app.state, "student_invite_service", None)
     if not isinstance(service, StudentInviteServicePort):
@@ -107,14 +90,45 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
     return service
 
 
-def get_invite_use_case() -> InviteStudentUseCase:
-    raise RuntimeError("Invite use case dependency not configured.")
+def get_invite_repository(request: Request) -> ExamRepositoryPort:
+    repository = getattr(request.app.state, "invite_repository", None)
+    if not isinstance(repository, ExamRepositoryPort):
+        raise RuntimeError(
+            "Missing invite repository configuration. Set app.state.invite_repository."
+        )
+    return repository
+
+
+def get_student_scope_repository(request: Request) -> StudentScopeRepositoryPort:
+    repository = get_invite_repository(request)
+    if not isinstance(repository, StudentScopeRepositoryPort):
+        raise RuntimeError(
+            "Invite repository must implement student scope persistence methods."
+        )
+    return repository
+
+
+def get_jwt_verifier(request: Request) -> CognitoJwtVerifier:
+    verifier = getattr(request.app.state, "jwt_verifier", None)
+    if not isinstance(verifier, CognitoJwtVerifier) and not hasattr(
+        verifier, "decode_teacher_token"
+    ):
+        raise RuntimeError("Missing JWT verifier configuration.")
+    return verifier
 
 
 def provide_invite_use_case(
     invite_service: Annotated[StudentInviteServicePort, Depends(get_student_invite_service)],
+    exam_repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
+    student_scope_repository: Annotated[
+        StudentScopeRepositoryPort, Depends(get_student_scope_repository)
+    ],
 ) -> InviteStudentUseCase:
-    return InviteStudentUseCase(invite_service=invite_service)
+    return InviteStudentUseCase(
+        invite_service=invite_service,
+        exam_repository=exam_repository,
+        student_scope_repository=student_scope_repository,
+    )
 
 
 @router.post(

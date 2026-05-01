@@ -22,7 +22,11 @@ from exam_api.application.invite_student import (
     InviteStudentResult,
     InviteStudentUseCase,
 )
-from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+from exam_api.domain.errors import (
+    ExamNotFoundError,
+    ExamOwnershipError,
+    StudentExamScopeConflictError,
+)
 from exam_api.domain.student import Student
 from exam_api.infrastructure.student_invite_adapter import CognitoSesStudentInviteAdapter
 from exam_api.ports.student_invite_port import InviteStudentResult as PortInviteStudentResult
@@ -40,9 +44,13 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.state.student_invite_service = Mock(spec=["invite_student"])
-    app.state.invite_repository = Mock(
-        spec=["get_exam", "upsert_student_scope", "get_student_scope"]
-    )
+    invite_repository = Mock()
+    invite_repository.get_exam = Mock()
+    invite_repository.save_exam = Mock()
+    invite_repository.save_notation_payload = Mock()
+    invite_repository.upsert_student_scope = Mock()
+    invite_repository.get_student_scope = Mock()
+    app.state.invite_repository = invite_repository
     app.state.jwt_verifier = Mock(spec=["decode_and_verify_token"])
     test_client = TestClient(app)
     try:
@@ -216,7 +224,10 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
         "Already exists",
     )
     cognito.admin_get_user.return_value = {
-        "UserAttributes": [{"Name": "sub", "Value": "existing-sub"}]
+        "UserAttributes": [
+            {"Name": "sub", "Value": "existing-sub"},
+            {"Name": "custom:exam_id", "Value": "exam-1"},
+        ]
     }
     adapter = CognitoSesStudentInviteAdapter(
         user_pool_id="pool-id",
@@ -232,6 +243,33 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito.admin_set_user_password.assert_called_once()
     cognito.admin_add_user_to_group.assert_called_once()
     ses.send_email.assert_called_once()
+
+
+def test_adapter_raises_conflict_when_existing_user_bound_to_other_exam() -> None:
+    cognito = Mock()
+    ses = Mock()
+    cognito.admin_create_user.side_effect = _make_client_error(
+        "UsernameExistsException",
+        "Already exists",
+    )
+    cognito.admin_get_user.return_value = {
+        "UserAttributes": [
+            {"Name": "sub", "Value": "existing-sub"},
+            {"Name": "custom:exam_id", "Value": "exam-legacy"},
+        ]
+    }
+    adapter = CognitoSesStudentInviteAdapter(
+        user_pool_id="pool-id",
+        ses_from_address="noreply@example.com",
+        cognito_client=cognito,
+        ses_client=ses,
+    )
+
+    with pytest.raises(StudentExamScopeConflictError):
+        adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
+
+    cognito.admin_set_user_password.assert_not_called()
+    ses.send_email.assert_not_called()
 
 
 def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
@@ -320,6 +358,23 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
 
     assert response.status_code == 403
     assert response.json()["detail"] == "forbidden"
+
+
+def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute.side_effect = StudentExamScopeConflictError("scope conflict")
+    client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
+
+    response = client.post(
+        "/exams/exam-1/students/student-1/invite",
+        json={"student_email": "student@example.com"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "scope conflict"
 
 
 def test_api_returns_401_when_token_invalid(client: TestClient) -> None:

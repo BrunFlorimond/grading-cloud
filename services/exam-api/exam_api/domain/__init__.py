@@ -7,6 +7,7 @@ from .errors import (
     InviteError,
     InvalidCredentialsError,
     StudentAlreadyInvitedError,
+    StudentExamScopeConflictError,
     WeakPasswordError,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "InviteError",
     "InvalidCredentialsError",
     "StudentAlreadyInvitedError",
+    "StudentExamScopeConflictError",
     "WeakPasswordError",
 ]

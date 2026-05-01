@@ -15,7 +15,11 @@ from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentUseCase,
 )
-from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+from exam_api.domain.errors import (
+    ExamNotFoundError,
+    ExamOwnershipError,
+    StudentExamScopeConflictError,
+)
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
@@ -151,19 +155,17 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
 
 def get_invite_repository(request: Request) -> ExamRepositoryPort:
     repository = getattr(request.app.state, "invite_repository", None)
-    if not hasattr(repository, "get_exam"):
+    if not isinstance(repository, ExamRepositoryPort):
         raise RuntimeError(
             "Missing invite repository configuration. Set app.state.invite_repository."
         )
     return repository
 
 
-def get_student_scope_repository(request: Request) -> StudentScopeRepositoryPort:
-    repository = get_invite_repository(request)
-    if not (
-        hasattr(repository, "upsert_student_scope")
-        and hasattr(repository, "get_student_scope")
-    ):
+def get_student_scope_repository(
+    repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
+) -> StudentScopeRepositoryPort:
+    if not isinstance(repository, StudentScopeRepositoryPort):
         raise RuntimeError(
             "Invite repository must implement student scope persistence methods."
         )
@@ -223,6 +225,11 @@ async def invite_student(
     except ExamOwnershipError as err:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(err),
+        ) from err
+    except StudentExamScopeConflictError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(err),
         ) from err
     return InviteStudentResponse(

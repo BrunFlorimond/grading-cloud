@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import httpx
@@ -14,6 +15,7 @@ class CognitoJwtVerifier:
         self._audience = audience
         self._jwks_url = f"{self._issuer}/.well-known/jwks.json"
         self._keys_by_kid: dict[str, dict[str, str]] = {}
+        self._refresh_lock = threading.Lock()
 
     def decode_and_verify_token(self, token: str) -> dict[str, Any]:
         header = jwt.get_unverified_header(token)
@@ -23,10 +25,13 @@ class CognitoJwtVerifier:
 
         key = self._keys_by_kid.get(kid)
         if key is None:
-            self._refresh_jwks()
-            key = self._keys_by_kid.get(kid)
-            if key is None:
-                raise JWTError("Unknown key identifier in JWT header.")
+            with self._refresh_lock:
+                key = self._keys_by_kid.get(kid)
+                if key is None:
+                    self._refresh_jwks()
+                    key = self._keys_by_kid.get(kid)
+                    if key is None:
+                        raise JWTError("Unknown key identifier in JWT header.")
 
         claims = jwt.decode(
             token,

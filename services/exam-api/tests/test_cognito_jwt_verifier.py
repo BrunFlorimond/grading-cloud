@@ -1,0 +1,119 @@
+"""Unit tests for CognitoJwtVerifier."""
+
+from __future__ import annotations
+
+from unittest.mock import Mock
+
+import pytest
+from jose import JWTError
+
+from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(monkeypatch: pytest.MonkeyPatch) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-1"},
+    )
+    decode_mock = Mock(
+        return_value={
+            "sub": "teacher-1",
+            "custom:role": "teacher",
+            "token_use": "id",
+        }
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
+        decode_mock,
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
+        lambda url, timeout: _FakeResponse(
+            {
+                "keys": [
+                    {
+                        "kid": "kid-1",
+                        "kty": "RSA",
+                        "alg": "RS256",
+                        "use": "sig",
+                        "n": "abc",
+                        "e": "AQAB",
+                    }
+                ]
+            }
+        ),
+    )
+
+    claims = verifier.decode_and_verify_token("header.payload.signature")
+
+    assert claims["sub"] == "teacher-1"
+    assert decode_mock.call_count == 1
+
+
+def test_decode_and_verify_token_rejects_non_id_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-1"},
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
+        lambda url, timeout: _FakeResponse(
+            {
+                "keys": [
+                    {
+                        "kid": "kid-1",
+                        "kty": "RSA",
+                        "alg": "RS256",
+                        "use": "sig",
+                        "n": "abc",
+                        "e": "AQAB",
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
+        lambda *args, **kwargs: {"token_use": "access"},
+    )
+
+    with pytest.raises(JWTError, match="Expected Cognito ID token"):
+        verifier.decode_and_verify_token("header.payload.signature")
+
+
+def test_decode_and_verify_token_fails_when_kid_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-missing"},
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
+        lambda url, timeout: _FakeResponse({"keys": []}),
+    )
+
+    with pytest.raises(JWTError):
+        verifier.decode_and_verify_token("header.payload.signature")

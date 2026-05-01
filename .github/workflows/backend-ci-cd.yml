@@ -84,7 +84,9 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: |
+          uv sync --dev
+          uv sync --package exam-api --inexact
 
       - name: Run pytest
         run: |

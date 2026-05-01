@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
+from pydantic import EmailStr, Field
 
+from exam_api.domain.errors import InvalidCredentialsError
 from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
 
 
 class LoginTeacherCommand(StrictModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=1)
 
 
 class LoginTeacherResult(StrictModel):
@@ -21,7 +23,12 @@ class LoginTeacherUseCase:
         self._auth = auth_service
 
     def execute(self, command: LoginTeacherCommand) -> LoginTeacherResult:
-        # TODO: call auth_service.login_teacher → get AuthTokens
-        # TODO: raise InvalidCredentialsError (401) if Cognito NotAuthorizedException
-        # TODO: raise UserNotFoundError (404) if Cognito UserNotFoundException
-        raise NotImplementedError
+        try:
+            tokens = self._auth.login_teacher(
+                email=str(command.email),
+                password=command.password,
+            )
+        except InvalidCredentialsError:
+            raise
+
+        return LoginTeacherResult(tokens=tokens)

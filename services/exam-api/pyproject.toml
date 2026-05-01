@@ -7,6 +7,8 @@ dependencies = [
   "grading_shared",
   "fastapi>=0.115.0",
   "boto3>=1.38.0",
+  "email-validator>=2.2.0",
+  "httpx>=0.28.0",
 ]
 
 [build-system]

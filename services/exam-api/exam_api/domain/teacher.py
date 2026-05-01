@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
+from pydantic import EmailStr
 
 
 class Teacher(StrictModel):
-    # TODO: implement Teacher domain entity
-    # Fields: teacher_id (Cognito sub, UUID), email, full_name
+    """Teacher aggregate loaded from Cognito identity data."""
+
     teacher_id: str
-    email: str
+    email: EmailStr
     full_name: str

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
+from pydantic import EmailStr, Field
 
+from exam_api.domain.errors import DuplicateEmailError, WeakPasswordError
 from exam_api.domain.teacher import Teacher
 from exam_api.ports.auth_service_port import AuthServicePort
 
 
 class RegisterTeacherCommand(StrictModel):
-    # TODO: validate email format and password strength at this boundary
-    email: str
-    password: str
-    full_name: str
+    email: EmailStr
+    password: str = Field(min_length=1)
+    full_name: str = Field(min_length=1)
 
 
 class RegisterTeacherResult(StrictModel):
@@ -24,8 +25,19 @@ class RegisterTeacherUseCase:
         self._auth = auth_service
 
     def execute(self, command: RegisterTeacherCommand) -> RegisterTeacherResult:
-        # TODO: call auth_service.register_teacher → get teacher_id (Cognito sub)
-        # TODO: build Teacher aggregate from teacher_id + command fields
-        # TODO: raise DuplicateEmailError (409) if Cognito UsernameExistsException
-        # TODO: raise WeakPasswordError (400) if Cognito InvalidPasswordException
-        raise NotImplementedError
+        try:
+            teacher_id = self._auth.register_teacher(
+                email=str(command.email),
+                password=command.password,
+                full_name=command.full_name,
+            )
+        except (DuplicateEmailError, WeakPasswordError):
+            raise
+
+        return RegisterTeacherResult(
+            teacher=Teacher(
+                teacher_id=teacher_id,
+                email=command.email,
+                full_name=command.full_name,
+            )
+        )

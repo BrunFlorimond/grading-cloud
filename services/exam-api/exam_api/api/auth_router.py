@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
+from typing import Annotated
 
 from exam_api.application.login_teacher import LoginTeacherCommand, LoginTeacherUseCase
 from exam_api.application.register_teacher import (
     RegisterTeacherCommand,
     RegisterTeacherUseCase,
 )
+from exam_api.domain.errors import (
+    DuplicateEmailError,
+    InvalidCredentialsError,
+    WeakPasswordError,
+)
+from exam_api.infrastructure.cognito_auth_adapter import CognitoAuthAdapter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    # TODO: add email validator (pydantic EmailStr)
-    email: str
+    email: EmailStr
     password: str
     full_name: str
 
@@ -31,7 +39,7 @@ class RegisterResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    email: str
+    email: EmailStr
     password: str
 
 
@@ -43,13 +51,11 @@ class LoginResponse(BaseModel):
 
 
 def get_register_use_case() -> RegisterTeacherUseCase:
-    # TODO: wire CognitoAuthAdapter with env-provided user_pool_id and client_id
-    raise NotImplementedError
+    return RegisterTeacherUseCase(auth_service=_build_auth_adapter())
 
 
 def get_login_use_case() -> LoginTeacherUseCase:
-    # TODO: wire CognitoAuthAdapter with env-provided user_pool_id and client_id
-    raise NotImplementedError
+    return LoginTeacherUseCase(auth_service=_build_auth_adapter())
 
 
 @router.post(
@@ -59,12 +65,32 @@ def get_login_use_case() -> LoginTeacherUseCase:
 )
 def register(
     body: RegisterRequest,
-    use_case: RegisterTeacherUseCase = Depends(get_register_use_case),
+    use_case: Annotated[RegisterTeacherUseCase, Depends(get_register_use_case)],
 ) -> RegisterResponse:
-    # TODO: call use_case.execute(RegisterTeacherCommand(...))
-    # TODO: map DuplicateEmailError → HTTP 409
-    # TODO: map WeakPasswordError → HTTP 400 with message
-    raise NotImplementedError
+    try:
+        result = use_case.execute(
+            RegisterTeacherCommand(
+                email=body.email,
+                password=body.password,
+                full_name=body.full_name,
+            )
+        )
+    except DuplicateEmailError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err) or "A teacher account already exists for this email.",
+        ) from err
+    except WeakPasswordError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(err) or "Password does not meet the required policy.",
+        ) from err
+
+    return RegisterResponse(
+        teacher_id=result.teacher.teacher_id,
+        email=str(result.teacher.email),
+        full_name=result.teacher.full_name,
+    )
 
 
 @router.post(
@@ -74,8 +100,30 @@ def register(
 )
 def login(
     body: LoginRequest,
-    use_case: LoginTeacherUseCase = Depends(get_login_use_case),
+    use_case: Annotated[LoginTeacherUseCase, Depends(get_login_use_case)],
 ) -> LoginResponse:
-    # TODO: call use_case.execute(LoginTeacherCommand(...))
-    # TODO: map InvalidCredentialsError → HTTP 401
-    raise NotImplementedError
+    try:
+        result = use_case.execute(
+            LoginTeacherCommand(email=body.email, password=body.password)
+        )
+    except InvalidCredentialsError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(err) or "Invalid email or password.",
+        ) from err
+
+    return LoginResponse(
+        id_token=result.tokens.id_token,
+        refresh_token=result.tokens.refresh_token,
+        expires_in=result.tokens.expires_in,
+    )
+
+
+def _build_auth_adapter() -> CognitoAuthAdapter:
+    user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
+    client_id = os.getenv("COGNITO_APP_CLIENT_ID")
+    if not user_pool_id or not client_id:
+        raise RuntimeError(
+            "Missing Cognito configuration: set COGNITO_USER_POOL_ID and COGNITO_APP_CLIENT_ID."
+        )
+    return CognitoAuthAdapter(user_pool_id=user_pool_id, client_id=client_id)

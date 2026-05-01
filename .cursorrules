@@ -1,0 +1,28 @@
+# Règles Cursor — grading-cloud
+
+## Toujours
+
+- Suivre l'architecture hexagonale : domain/ = zéro import AWS
+- Utiliser Pydantic v2 ConfigDict(extra="forbid", strict=True)
+- Vérifier que les nouveaux ports sont des ABCs dans grading_shared/ports/
+- Types explicites partout (pas de `Any` sauf cas justifié avec commentaire)
+
+## Jamais
+
+- Import boto3/botocore dans domain/ ou ports/
+- Appels réseau réels dans les tests
+- Scan full-table DynamoDB (FilterExpression sans KeyCondition)
+- Publier un événement SQS avant la mise à jour DynamoDB
+
+## Format des réponses
+
+Quand tu génères du code :
+1. Montre d'abord la structure de fichiers impactée
+2. Génère dans l'ordre : domain → ports → application → infrastructure → api → tests
+3. Signale explicitement les edge cases non couverts
+
+## Stack de référence
+
+- Runtime : Python 3.12 / FastAPI + Pydantic v2
+- Tests : pytest + pytest-asyncio + moto
+- Infra : AWS CDK Python / uv workspaces

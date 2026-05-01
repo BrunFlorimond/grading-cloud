@@ -401,6 +401,22 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     assert response.status_code == 403
 
 
+def test_student_scope_endpoint_returns_403_on_exam_mismatch(client: TestClient) -> None:
+    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
+        "sub": "student-sub-123",
+        "custom:role": "student",
+        "custom:exam_id": "exam-from-token",
+        "token_use": "id",
+    }
+
+    response = client.get(
+        "/exams/exam-from-path/students/student-sub-123/scope",
+        headers={"Authorization": "Bearer valid.token.value"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_student_scope_endpoint_returns_404_when_scope_is_missing(
     client: TestClient,
 ) -> None:

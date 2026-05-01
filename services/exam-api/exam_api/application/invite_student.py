@@ -17,7 +17,6 @@ class InviteStudentCommand(StrictModel):
     exam_id: str
     student_id: str
     student_email: EmailStr
-    # TODO(#10): teacher_id should come from the validated JWT claims, not the request body
     teacher_id: str
 
 

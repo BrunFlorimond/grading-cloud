@@ -150,9 +150,7 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
 
 def get_invite_repository(request: Request) -> ExamRepositoryPort:
     repository = getattr(request.app.state, "invite_repository", None)
-    if not isinstance(repository, ExamRepositoryPort) and not hasattr(
-        repository, "get_exam"
-    ):
+    if not hasattr(repository, "get_exam"):
         raise RuntimeError(
             "Missing invite repository configuration. Set app.state.invite_repository."
         )
@@ -161,7 +159,7 @@ def get_invite_repository(request: Request) -> ExamRepositoryPort:
 
 def get_student_scope_repository(request: Request) -> StudentScopeRepositoryPort:
     repository = get_invite_repository(request)
-    if not isinstance(repository, StudentScopeRepositoryPort) and not (
+    if not (
         hasattr(repository, "upsert_student_scope")
         and hasattr(repository, "get_student_scope")
     ):

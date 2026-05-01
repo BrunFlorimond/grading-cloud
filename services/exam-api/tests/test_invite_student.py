@@ -43,7 +43,7 @@ def client() -> TestClient:
     app.state.invite_repository = Mock(
         spec=["get_exam", "upsert_student_scope", "get_student_scope"]
     )
-    app.state.jwt_verifier = Mock(spec=["decode_teacher_token"])
+    app.state.jwt_verifier = Mock(spec=["decode_and_verify_token"])
     test_client = TestClient(app)
     try:
         yield test_client
@@ -76,7 +76,6 @@ def test_use_case_returns_new_invite_result() -> None:
     student_scope_repository = Mock()
     invite_service.invite_student.return_value = PortInviteStudentResult(
         cognito_sub="student-sub-123",
-        temporary_password="TemporaryPassword123!",
         already_existed=False,
     )
     use_case = _build_use_case(
@@ -120,7 +119,6 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     )
     invite_service.invite_student.return_value = PortInviteStudentResult(
         cognito_sub="student-sub-existing",
-        temporary_password="TemporaryPassword123!",
         already_existed=True,
     )
     use_case = _build_use_case(invite_service=invite_service, exam_repository=exam_repository)
@@ -197,7 +195,6 @@ def test_adapter_creates_cognito_user_and_sends_email() -> None:
 
     assert result.cognito_sub == "student-sub-123"
     assert result.already_existed is False
-    assert result.temporary_password
     cognito.admin_create_user.assert_called_once()
     create_call = cognito.admin_create_user.call_args.kwargs
     assert create_call["MessageAction"] == "SUPPRESS"
@@ -327,7 +324,9 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
 
 def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     mock_use_case = Mock()
-    client.app.state.jwt_verifier.decode_teacher_token.side_effect = JWTError("invalid token")
+    client.app.state.jwt_verifier.decode_and_verify_token.side_effect = JWTError(
+        "invalid token"
+    )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
 
     response = client.post(
@@ -342,7 +341,7 @@ def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
 
 def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
     mock_use_case = Mock()
-    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "teacher-1",
         "custom:role": "student",
     }
@@ -361,7 +360,7 @@ def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
 def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client: TestClient,
 ) -> None:
-    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-123",
         "custom:role": "student",
         "custom:exam_id": "exam-1",
@@ -387,7 +386,7 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
 
 
 def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) -> None:
-    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-abc",
         "custom:role": "student",
         "custom:exam_id": "exam-1",
@@ -400,3 +399,22 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     )
 
     assert response.status_code == 403
+
+
+def test_student_scope_endpoint_returns_404_when_scope_is_missing(
+    client: TestClient,
+) -> None:
+    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
+        "sub": "student-sub-123",
+        "custom:role": "student",
+        "custom:exam_id": "exam-1",
+        "token_use": "id",
+    }
+    client.app.state.invite_repository.get_student_scope.return_value = None
+
+    response = client.get(
+        "/exams/exam-1/students/student-sub-123/scope",
+        headers={"Authorization": "Bearer valid.token.value"},
+    )
+
+    assert response.status_code == 404

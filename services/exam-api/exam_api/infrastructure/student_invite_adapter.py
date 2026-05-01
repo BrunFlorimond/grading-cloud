@@ -82,7 +82,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         )
         return InviteStudentResult(
             cognito_sub=cognito_sub,
-            temporary_password=temporary_password,
             already_existed=already_existed,
         )
 

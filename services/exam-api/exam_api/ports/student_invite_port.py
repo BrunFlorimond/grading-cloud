@@ -10,9 +10,7 @@ from grading_shared.domain.models import StrictModel
 class InviteStudentResult(StrictModel):
     """Data returned by the invite service after provisioning the student account."""
 
-    # TODO(#10): confirm whether temporary_password should be returned or only forwarded to SES
     cognito_sub: str
-    temporary_password: str
     already_existed: bool
 
 

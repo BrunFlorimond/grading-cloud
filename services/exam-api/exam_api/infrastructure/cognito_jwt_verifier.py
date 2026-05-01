@@ -15,7 +15,7 @@ class CognitoJwtVerifier:
         self._jwks_url = f"{self._issuer}/.well-known/jwks.json"
         self._keys_by_kid: dict[str, dict[str, str]] = {}
 
-    def decode_teacher_token(self, token: str) -> dict[str, Any]:
+    def decode_and_verify_token(self, token: str) -> dict[str, Any]:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         if not isinstance(kid, str) or not kid:

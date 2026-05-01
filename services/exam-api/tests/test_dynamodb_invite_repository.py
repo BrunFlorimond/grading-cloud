@@ -58,12 +58,13 @@ def test_upsert_student_scope_writes_student_item() -> None:
         external_student_id="roster-17",
     )
 
-    called_item = table.put_item.call_args.kwargs["Item"]
-    assert called_item["PK"] == "EXAM#exam-1"
-    assert called_item["SK"] == "STUDENT#student-sub-1"
-    assert called_item["teacher_id"] == "teacher-1"
-    assert called_item["external_student_id"] == "roster-17"
-    assert called_item["email"] == "student@example.com"
+    call_kwargs = table.update_item.call_args.kwargs
+    assert call_kwargs["Key"]["PK"] == "EXAM#exam-1"
+    assert call_kwargs["Key"]["SK"] == "STUDENT#student-sub-1"
+    assert "if_not_exists(invited_at, :invited_at)" in call_kwargs["UpdateExpression"]
+    assert call_kwargs["ExpressionAttributeValues"][":teacher_id"] == "teacher-1"
+    assert call_kwargs["ExpressionAttributeValues"][":external_student_id"] == "roster-17"
+    assert call_kwargs["ExpressionAttributeValues"][":email"] == "student@example.com"
 
 
 def test_get_student_scope_returns_student_record() -> None:

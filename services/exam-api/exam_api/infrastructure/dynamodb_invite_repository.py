@@ -77,17 +77,27 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         self, *, student: Student, teacher_id: str, external_student_id: str
     ) -> None:
         now_iso = datetime.now(UTC).isoformat()
-        self._table.put_item(
-            Item={
+        self._table.update_item(
+            Key={
                 "PK": f"EXAM#{student.exam_id}",
                 "SK": f"STUDENT#{student.student_id}",
-                "teacher_id": teacher_id,
-                "student_id": student.student_id,
-                "external_student_id": external_student_id,
-                "email": str(student.email),
-                "invited_at": now_iso,
-                "updated_at": now_iso,
-            }
+            },
+            UpdateExpression=(
+                "SET teacher_id = :teacher_id, "
+                "student_id = :student_id, "
+                "external_student_id = :external_student_id, "
+                "email = :email, "
+                "updated_at = :updated_at, "
+                "invited_at = if_not_exists(invited_at, :invited_at)"
+            ),
+            ExpressionAttributeValues={
+                ":teacher_id": teacher_id,
+                ":student_id": student.student_id,
+                ":external_student_id": external_student_id,
+                ":email": str(student.email),
+                ":updated_at": now_iso,
+                ":invited_at": now_iso,
+            },
         )
 
     def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:

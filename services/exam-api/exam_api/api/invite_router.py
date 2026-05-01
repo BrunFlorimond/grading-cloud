@@ -75,7 +75,7 @@ def get_current_teacher(
         )
     jwt_verifier = get_jwt_verifier(request)
     try:
-        claims = jwt_verifier.decode_teacher_token(token)
+        claims = jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -113,7 +113,7 @@ def get_current_student(
         )
     jwt_verifier = get_jwt_verifier(request)
     try:
-        claims = jwt_verifier.decode_teacher_token(token)
+        claims = jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -174,7 +174,7 @@ def get_student_scope_repository(request: Request) -> StudentScopeRepositoryPort
 def get_jwt_verifier(request: Request) -> JwtVerifierPort:
     verifier = getattr(request.app.state, "jwt_verifier", None)
     if not isinstance(verifier, JwtVerifierPort) and not hasattr(
-        verifier, "decode_teacher_token"
+        verifier, "decode_and_verify_token"
     ):
         raise RuntimeError("Missing JWT verifier configuration.")
     return verifier

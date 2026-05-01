@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, SecretStr, field_validator
 
 from exam_api.domain.errors import InvalidCredentialsError
 from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
@@ -11,7 +11,14 @@ from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
 
 class LoginTeacherCommand(StrictModel):
     email: EmailStr
-    password: str = Field(min_length=1)
+    password: SecretStr
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password_not_empty(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("Password must not be empty.")
+        return value
 
 
 class LoginTeacherResult(StrictModel):
@@ -26,7 +33,7 @@ class LoginTeacherUseCase:
         try:
             tokens = self._auth.login_teacher(
                 email=str(command.email),
-                password=command.password,
+                password=command.password.get_secret_value(),
             )
         except InvalidCredentialsError:
             raise

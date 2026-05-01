@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, EmailStr
-from typing import Annotated
+from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
 
 from exam_api.application.login_teacher import LoginTeacherCommand, LoginTeacherUseCase
 from exam_api.application.register_teacher import (
@@ -26,8 +26,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class RegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     email: EmailStr
-    password: str
+    password: SecretStr
     full_name: str
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password_not_empty(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("Password must not be empty.")
+        return value
 
 
 class RegisterResponse(BaseModel):
@@ -40,7 +47,14 @@ class RegisterResponse(BaseModel):
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     email: EmailStr
-    password: str
+    password: SecretStr
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password_not_empty(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("Password must not be empty.")
+        return value
 
 
 class LoginResponse(BaseModel):

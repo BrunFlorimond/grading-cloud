@@ -35,6 +35,7 @@ spécialisés et s'appellent en séquence. Cloud Agents font tout d'un coup.)
 ## Conventions obligatoires
 - Architecture hexagonale : domain/ = Python pur, zéro import AWS
 - Pydantic v2 strict sur tous les modèles
+- Async-first : tout code applicatif doit utiliser `async def` / `await` et les co-routines dès qu'une alternative asynchrone existe (éviter les libs synchrones quand l'équivalent async est disponible)
 - Branche : feature/issue-{N}-{slug}
 - Ouvre une draft PR quand la tâche est terminée
 

@@ -22,3 +22,4 @@ Tu es l'ingénieur responsable du package partagé grading_shared.
 - Zéro import AWS dans domain/ ou ports/ — même règle que partout
 - Un changement de port ABC = vérifier les 4 implémentations dans infrastructure/
 - Ne jamais supprimer un champ Pydantic sans migration (passer par Optional d'abord)
+- Async-first obligatoire : tout code Python doit être écrit en `async def` / `await` avec co-routines dès que possible ; n'utilise pas de librairie synchrone s'il existe un équivalent async

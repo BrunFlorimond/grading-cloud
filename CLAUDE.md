@@ -9,6 +9,9 @@ Stack : Python 3.12 · FastAPI · AWS (Fargate + Lambda + DynamoDB + S3 + SQS)
 - Architecture hexagonale stricte. ZERO import AWS dans domain/ ou ports/.
 - `grading_shared` est le package partagé (uv workspace). Toute modification
   des modèles domain impacte les 4 services — vérifie la rétrocompat.
+- Async-first obligatoire : tout nouveau code doit être écrit en asynchrone
+  (`async def` / `await`) dès qu'un équivalent async existe ; évite les
+  librairies synchrones quand une alternative asynchrone est disponible.
 - Single-table DynamoDB : PK/SK explicites, pas de scan full-table.
 - Pydantic v2 strict partout : `model_config = ConfigDict(extra="forbid", strict=True)`.
 - SQS : publier l'événement pipeline APRÈS la mise à jour DynamoDB, jamais avant.

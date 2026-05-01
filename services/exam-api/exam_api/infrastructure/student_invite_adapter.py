@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import string
 from typing import Any
@@ -28,12 +29,19 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         self._cognito = cognito_client or boto3.client("cognito-idp")
         self._ses = ses_client or boto3.client("ses")
 
-    def invite_student(
+    async def invite_student(
         self,
         *,
         student_email: str,
         exam_id: str,
     ) -> InviteStudentResult:
+        return await asyncio.to_thread(
+            self._invite_student_sync,
+            student_email,
+            exam_id,
+        )
+
+    def _invite_student_sync(self, student_email: str, exam_id: str) -> InviteStudentResult:
         temporary_password = self._generate_temporary_password()
         already_existed = False
         try:
@@ -86,18 +94,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             cognito_sub=cognito_sub,
             already_existed=already_existed,
         )
-
-    def lookup_student_sub_by_email(self, *, student_email: str) -> str | None:
-        try:
-            response = self._cognito.admin_get_user(
-                UserPoolId=self._user_pool_id,
-                Username=student_email,
-            )
-        except ClientError as err:
-            if self._extract_error_code(err) == "UserNotFoundException":
-                return None
-            raise
-        return self._extract_user_sub(response, student_email)
 
     def _send_invitation_email(
         self,

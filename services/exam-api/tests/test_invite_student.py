@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -43,14 +43,13 @@ def _make_client_error(code: str, message: str) -> ClientError:
 def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
-    app.state.student_invite_service = Mock(spec=["lookup_student_sub_by_email", "invite_student"])
+    app.state.student_invite_service = Mock(spec=["invite_student"])
     invite_repository = Mock()
     invite_repository.get_exam = Mock()
     invite_repository.save_exam = Mock()
     invite_repository.save_notation_payload = Mock()
-    invite_repository.upsert_student_scope = Mock()
-    invite_repository.get_student_scope = Mock()
-    invite_repository.get_exam_id_for_student_sub = Mock()
+    invite_repository.upsert_student_scope = AsyncMock()
+    invite_repository.get_student_scope = AsyncMock()
     app.state.invite_repository = invite_repository
     app.state.jwt_verifier = Mock(spec=["decode_and_verify_token"])
     test_client = TestClient(app)
@@ -69,11 +68,11 @@ def _build_use_case(
     invite_adapter = invite_service
     if invite_adapter is None:
         invite_adapter = Mock()
-        invite_adapter.lookup_student_sub_by_email.return_value = None
+        invite_adapter.invite_student = AsyncMock()
     scope_repository = student_scope_repository
     if scope_repository is None:
         scope_repository = Mock()
-        scope_repository.get_exam_id_for_student_sub.return_value = None
+        scope_repository.upsert_student_scope = AsyncMock()
     return InviteStudentUseCase(
         invite_service=invite_adapter,
         exam_repository=exam_repository or Mock(),
@@ -81,9 +80,15 @@ def _build_use_case(
     )
 
 
-def test_use_case_returns_new_invite_result() -> None:
+@pytest.mark.asyncio
+async def test_use_case_returns_new_invite_result() -> None:
     invite_service = Mock()
-    invite_service.lookup_student_sub_by_email.return_value = None
+    invite_service.invite_student = AsyncMock(
+        return_value=PortInviteStudentResult(
+            cognito_sub="student-sub-123",
+            already_existed=False,
+        )
+    )
     exam_repository = Mock()
     exam_repository.get_exam.return_value = Exam(
         exam_id="exam-1",
@@ -92,18 +97,14 @@ def test_use_case_returns_new_invite_result() -> None:
         status=ExamStatus.DRAFT,
     )
     student_scope_repository = Mock()
-    student_scope_repository.get_exam_id_for_student_sub.return_value = None
-    invite_service.invite_student.return_value = PortInviteStudentResult(
-        cognito_sub="student-sub-123",
-        already_existed=False,
-    )
+    student_scope_repository.upsert_student_scope = AsyncMock()
     use_case = _build_use_case(
         invite_service=invite_service,
         exam_repository=exam_repository,
         student_scope_repository=student_scope_repository,
     )
 
-    result = use_case.execute(
+    result = await use_case.execute(
         InviteStudentCommand(
             exam_id="exam-1",
             student_id="student-external-id",
@@ -120,32 +121,30 @@ def test_use_case_returns_new_invite_result() -> None:
         ),
         re_invited=False,
     )
-    invite_service.invite_student.assert_called_once_with(
+    invite_service.invite_student.assert_awaited_once_with(
         student_email="student@example.com",
         exam_id="exam-1",
     )
-    invite_service.lookup_student_sub_by_email.assert_called_once_with(
-        student_email="student@example.com"
-    )
-    student_scope_repository.get_exam_id_for_student_sub.assert_not_called()
-    student_scope_repository.upsert_student_scope.assert_called_once()
+    student_scope_repository.upsert_student_scope.assert_awaited_once()
 
 
-def test_use_case_returns_reinvited_true_when_student_exists() -> None:
+@pytest.mark.asyncio
+async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     invite_service = Mock()
-    invite_service.lookup_student_sub_by_email.return_value = "student-sub-existing"
+    invite_service.invite_student = AsyncMock(
+        return_value=PortInviteStudentResult(
+            cognito_sub="student-sub-existing",
+            already_existed=True,
+        )
+    )
     exam_repository = Mock()
     student_scope_repository = Mock()
-    student_scope_repository.get_exam_id_for_student_sub.return_value = "exam-1"
+    student_scope_repository.upsert_student_scope = AsyncMock()
     exam_repository.get_exam.return_value = Exam(
         exam_id="exam-1",
         teacher_id="teacher-1",
         title="Math Midterm",
         status=ExamStatus.DRAFT,
-    )
-    invite_service.invite_student.return_value = PortInviteStudentResult(
-        cognito_sub="student-sub-existing",
-        already_existed=True,
     )
     use_case = _build_use_case(
         invite_service=invite_service,
@@ -153,7 +152,7 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
         student_scope_repository=student_scope_repository,
     )
 
-    result = use_case.execute(
+    result = await use_case.execute(
         InviteStudentCommand(
             exam_id="exam-1",
             student_id="student-external-id",
@@ -164,15 +163,18 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
 
     assert result.re_invited is True
     assert result.student.student_id == "student-sub-existing"
-    student_scope_repository.get_exam_id_for_student_sub.assert_called_once_with(
-        student_sub="student-sub-existing"
-    )
-    student_scope_repository.upsert_student_scope.assert_called_once()
+    student_scope_repository.upsert_student_scope.assert_awaited_once()
 
 
-def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> None:
+@pytest.mark.asyncio
+async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
     invite_service = Mock()
-    invite_service.lookup_student_sub_by_email.return_value = "student-sub-existing"
+    invite_service.invite_student = AsyncMock(
+        return_value=PortInviteStudentResult(
+            cognito_sub="student-sub-existing",
+            already_existed=True,
+        )
+    )
     exam_repository = Mock()
     student_scope_repository = Mock()
     exam_repository.get_exam.return_value = Exam(
@@ -181,7 +183,11 @@ def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> 
         title="Math Midterm",
         status=ExamStatus.DRAFT,
     )
-    student_scope_repository.get_exam_id_for_student_sub.return_value = "exam-legacy"
+    student_scope_repository.upsert_student_scope = AsyncMock(
+        side_effect=StudentExamScopeConflictError(
+            "Student account is already scoped to another exam."
+        )
+    )
     use_case = _build_use_case(
         invite_service=invite_service,
         exam_repository=exam_repository,
@@ -189,7 +195,7 @@ def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> 
     )
 
     with pytest.raises(StudentExamScopeConflictError):
-        use_case.execute(
+        await use_case.execute(
             InviteStudentCommand(
                 exam_id="exam-1",
                 student_id="student-external-id",
@@ -198,17 +204,18 @@ def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> 
             )
         )
 
-    invite_service.invite_student.assert_not_called()
-    student_scope_repository.upsert_student_scope.assert_not_called()
+    invite_service.invite_student.assert_awaited_once()
+    student_scope_repository.upsert_student_scope.assert_awaited_once()
 
 
-def test_use_case_raises_exam_not_found() -> None:
+@pytest.mark.asyncio
+async def test_use_case_raises_exam_not_found() -> None:
     exam_repository = Mock()
     exam_repository.get_exam.return_value = None
     use_case = _build_use_case(exam_repository=exam_repository)
 
     with pytest.raises(ExamNotFoundError):
-        use_case.execute(
+        await use_case.execute(
             InviteStudentCommand(
                 exam_id="exam-missing",
                 student_id="student-external-id",
@@ -218,7 +225,8 @@ def test_use_case_raises_exam_not_found() -> None:
         )
 
 
-def test_use_case_raises_exam_ownership_error() -> None:
+@pytest.mark.asyncio
+async def test_use_case_raises_exam_ownership_error() -> None:
     exam_repository = Mock()
     exam_repository.get_exam.return_value = Exam(
         exam_id="exam-1",
@@ -229,7 +237,7 @@ def test_use_case_raises_exam_ownership_error() -> None:
     use_case = _build_use_case(exam_repository=exam_repository)
 
     with pytest.raises(ExamOwnershipError):
-        use_case.execute(
+        await use_case.execute(
             InviteStudentCommand(
                 exam_id="exam-1",
                 student_id="student-external-id",
@@ -239,7 +247,8 @@ def test_use_case_raises_exam_ownership_error() -> None:
         )
 
 
-def test_adapter_creates_cognito_user_and_sends_email() -> None:
+@pytest.mark.asyncio
+async def test_adapter_creates_cognito_user_and_sends_email() -> None:
     cognito = Mock()
     ses = Mock()
     cognito.admin_create_user.return_value = {
@@ -257,7 +266,7 @@ def test_adapter_creates_cognito_user_and_sends_email() -> None:
         ses_client=ses,
     )
 
-    result = adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
+    result = await adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
 
     assert result.cognito_sub == "student-sub-123"
     assert result.already_existed is False
@@ -273,7 +282,8 @@ def test_adapter_creates_cognito_user_and_sends_email() -> None:
     ses.send_email.assert_called_once()
 
 
-def test_adapter_handles_existing_user_without_duplicate_account() -> None:
+@pytest.mark.asyncio
+async def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito = Mock()
     ses = Mock()
     cognito.admin_create_user.side_effect = _make_client_error(
@@ -292,59 +302,27 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
         ses_client=ses,
     )
 
-    result = adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
+    result = await adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
 
     assert result.cognito_sub == "existing-sub"
     assert result.already_existed is True
+    cognito.admin_get_user.assert_called_once()
     cognito.admin_set_user_password.assert_called_once()
     cognito.admin_add_user_to_group.assert_called_once()
     ses.send_email.assert_called_once()
 
 
-def test_adapter_lookup_student_sub_by_email_returns_sub_when_exists() -> None:
-    cognito = Mock()
-    cognito.admin_get_user.return_value = {
-        "UserAttributes": [{"Name": "sub", "Value": "existing-sub"}]
-    }
-    adapter = CognitoSesStudentInviteAdapter(
-        user_pool_id="pool-id",
-        ses_from_address="noreply@example.com",
-        cognito_client=cognito,
-        ses_client=Mock(),
-    )
-
-    student_sub = adapter.lookup_student_sub_by_email(student_email="student@example.com")
-
-    assert student_sub == "existing-sub"
-
-
-def test_adapter_lookup_student_sub_by_email_returns_none_when_user_not_found() -> None:
-    cognito = Mock()
-    cognito.admin_get_user.side_effect = _make_client_error(
-        "UserNotFoundException",
-        "Not found",
-    )
-    adapter = CognitoSesStudentInviteAdapter(
-        user_pool_id="pool-id",
-        ses_from_address="noreply@example.com",
-        cognito_client=cognito,
-        ses_client=Mock(),
-    )
-
-    student_sub = adapter.lookup_student_sub_by_email(student_email="student@example.com")
-
-    assert student_sub is None
-
-
 def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.return_value = InviteStudentResult(
-        student=Student(
-            student_id="student-sub-123",
-            exam_id="exam-1",
-            email="student@example.com",
-        ),
-        re_invited=False,
+    mock_use_case.execute = AsyncMock(
+        return_value=InviteStudentResult(
+            student=Student(
+                student_id="student-sub-123",
+                exam_id="exam-1",
+                email="student@example.com",
+            ),
+            re_invited=False,
+        )
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
     client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
@@ -368,13 +346,15 @@ def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
 
 def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.return_value = InviteStudentResult(
-        student=Student(
-            student_id="student-sub-existing",
-            exam_id="exam-1",
-            email="student@example.com",
-        ),
-        re_invited=True,
+    mock_use_case.execute = AsyncMock(
+        return_value=InviteStudentResult(
+            student=Student(
+                student_id="student-sub-existing",
+                exam_id="exam-1",
+                email="student@example.com",
+            ),
+            re_invited=True,
+        )
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
     client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
@@ -392,7 +372,7 @@ def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
 
 def test_api_returns_404_when_exam_not_found(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = ExamNotFoundError("exam not found")
+    mock_use_case.execute = AsyncMock(side_effect=ExamNotFoundError("exam not found"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
     client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
@@ -409,7 +389,7 @@ def test_api_returns_404_when_exam_not_found(client: TestClient) -> None:
 
 def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = ExamOwnershipError("forbidden")
+    mock_use_case.execute = AsyncMock(side_effect=ExamOwnershipError("forbidden"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
     client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
@@ -426,7 +406,7 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
 
 def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = StudentExamScopeConflictError("scope conflict")
+    mock_use_case.execute = AsyncMock(side_effect=StudentExamScopeConflictError("scope conflict"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
     client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
@@ -443,6 +423,7 @@ def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> N
 
 def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock()
     client.app.state.jwt_verifier.decode_and_verify_token.side_effect = JWTError(
         "invalid token"
     )
@@ -460,6 +441,7 @@ def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
 
 def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
     mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock()
     client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "teacher-1",
         "custom:role": "student",
@@ -484,10 +466,12 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
         "custom:role": "student",
         "token_use": "id",
     }
-    client.app.state.invite_repository.get_student_scope.return_value = Student(
-        student_id="student-sub-123",
-        exam_id="exam-1",
-        email="student@example.com",
+    client.app.state.invite_repository.get_student_scope = AsyncMock(
+        return_value=Student(
+            student_id="student-sub-123",
+            exam_id="exam-1",
+            email="student@example.com",
+        )
     )
 
     response = client.get(
@@ -525,10 +509,12 @@ def test_student_scope_endpoint_ignores_custom_exam_id_claim(client: TestClient)
         "custom:exam_id": "exam-from-token",
         "token_use": "id",
     }
-    client.app.state.invite_repository.get_student_scope.return_value = Student(
-        student_id="student-sub-123",
-        exam_id="exam-from-path",
-        email="student@example.com",
+    client.app.state.invite_repository.get_student_scope = AsyncMock(
+        return_value=Student(
+            student_id="student-sub-123",
+            exam_id="exam-from-path",
+            email="student@example.com",
+        )
     )
 
     response = client.get(
@@ -548,7 +534,7 @@ def test_student_scope_endpoint_returns_404_when_scope_is_missing(
         "custom:role": "student",
         "token_use": "id",
     }
-    client.app.state.invite_repository.get_student_scope.return_value = None
+    client.app.state.invite_repository.get_student_scope = AsyncMock(return_value=None)
 
     response = client.get(
         "/exams/exam-1/students/student-sub-123/scope",

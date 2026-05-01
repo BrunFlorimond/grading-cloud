@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import pytest
 from botocore.exceptions import ClientError
 from grading_shared.domain.exam import Exam, ExamStatus
 from grading_shared.domain.models import MetaModel, NotationPayload, StudentModel, TotauxModel
-import pytest
 
 from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.domain.student import Student
@@ -42,7 +42,8 @@ def test_get_exam_returns_exam_when_metadata_exists() -> None:
     )
 
 
-def test_upsert_student_scope_writes_student_item() -> None:
+@pytest.mark.asyncio
+async def test_upsert_student_scope_writes_student_item() -> None:
     table = Mock()
     dynamodb = Mock()
     dynamodb.Table.return_value = table
@@ -52,7 +53,7 @@ def test_upsert_student_scope_writes_student_item() -> None:
         dynamodb_resource=dynamodb,
     )
 
-    repository.upsert_student_scope(
+    await repository.upsert_student_scope(
         student=Student(
             student_id="student-sub-1",
             exam_id="exam-1",
@@ -86,7 +87,8 @@ def test_upsert_student_scope_writes_student_item() -> None:
     )
 
 
-def test_upsert_student_scope_raises_conflict_when_condition_fails() -> None:
+@pytest.mark.asyncio
+async def test_upsert_student_scope_raises_conflict_when_condition_fails() -> None:
     table = Mock()
     dynamodb = Mock()
     dynamodb.Table.return_value = table
@@ -110,7 +112,7 @@ def test_upsert_student_scope_raises_conflict_when_condition_fails() -> None:
     )
 
     with pytest.raises(StudentExamScopeConflictError):
-        repository.upsert_student_scope(
+        await repository.upsert_student_scope(
             student=Student(
                 student_id="student-sub-1",
                 exam_id="exam-2",
@@ -121,7 +123,8 @@ def test_upsert_student_scope_raises_conflict_when_condition_fails() -> None:
         )
 
 
-def test_get_student_scope_returns_student_record() -> None:
+@pytest.mark.asyncio
+async def test_get_student_scope_returns_student_record() -> None:
     table = Mock()
     table.get_item.return_value = {
         "Item": {
@@ -137,33 +140,12 @@ def test_get_student_scope_returns_student_record() -> None:
         dynamodb_resource=dynamodb,
     )
 
-    student = repository.get_student_scope(exam_id="exam-1", student_sub="student-sub-1")
+    student = await repository.get_student_scope(exam_id="exam-1", student_sub="student-sub-1")
 
     assert student is not None
     assert student.student_id == "student-sub-1"
     assert student.exam_id == "exam-1"
     assert str(student.email) == "student@example.com"
-
-
-def test_get_exam_id_for_student_sub_returns_exam_id() -> None:
-    table = Mock()
-    table.get_item.return_value = {
-        "Item": {
-            "PK": "STUDENT#student-sub-1",
-            "SK": "SCOPE",
-            "exam_id": "exam-1",
-        }
-    }
-    dynamodb = Mock()
-    dynamodb.Table.return_value = table
-    repository = DynamoDbInviteRepository(
-        table_name="grading-table",
-        dynamodb_resource=dynamodb,
-    )
-
-    exam_id = repository.get_exam_id_for_student_sub(student_sub="student-sub-1")
-
-    assert exam_id == "exam-1"
 
 
 def test_save_notation_payload_persists_payload_under_student_key() -> None:

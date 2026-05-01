@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from grading_shared.domain.exam import Exam
 from grading_shared.ports import ExamRepositoryPort
 from grading_shared.domain.models import StrictModel
@@ -10,7 +12,6 @@ from pydantic import EmailStr
 from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
-    StudentExamScopeConflictError,
 )
 from exam_api.domain.student import Student
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
@@ -40,23 +41,12 @@ class InviteStudentUseCase:
         self._exam_repository = exam_repository
         self._student_scope_repository = student_scope_repository
 
-    def execute(self, command: InviteStudentCommand) -> InviteStudentResult:
-        exam = self._load_owned_exam(
+    async def execute(self, command: InviteStudentCommand) -> InviteStudentResult:
+        exam = await self._load_owned_exam(
             exam_id=command.exam_id,
             teacher_id=command.teacher_id,
         )
-        existing_student_sub = self._invite_service.lookup_student_sub_by_email(
-            student_email=str(command.student_email)
-        )
-        if existing_student_sub is not None:
-            existing_exam_id = self._student_scope_repository.get_exam_id_for_student_sub(
-                student_sub=existing_student_sub
-            )
-            if existing_exam_id is not None and existing_exam_id != exam.exam_id:
-                raise StudentExamScopeConflictError(
-                    "Student account is already scoped to another exam."
-                )
-        invite_result = self._invite_service.invite_student(
+        invite_result = await self._invite_service.invite_student(
             student_email=str(command.student_email),
             exam_id=exam.exam_id,
         )
@@ -65,7 +55,7 @@ class InviteStudentUseCase:
             exam_id=exam.exam_id,
             email=command.student_email,
         )
-        self._student_scope_repository.upsert_student_scope(
+        await self._student_scope_repository.upsert_student_scope(
             student=student,
             teacher_id=command.teacher_id,
             external_student_id=command.student_id,
@@ -75,8 +65,8 @@ class InviteStudentUseCase:
             re_invited=invite_result.already_existed,
         )
 
-    def _load_owned_exam(self, *, exam_id: str, teacher_id: str) -> Exam:
-        exam = self._exam_repository.get_exam(exam_id=exam_id)
+    async def _load_owned_exam(self, *, exam_id: str, teacher_id: str) -> Exam:
+        exam = await asyncio.to_thread(self._exam_repository.get_exam, exam_id=exam_id)
         if exam is None:
             raise ExamNotFoundError(f"Exam {exam_id} not found.")
         if exam.teacher_id != teacher_id:

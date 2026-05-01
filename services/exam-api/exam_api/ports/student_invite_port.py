@@ -16,10 +16,7 @@ class InviteStudentResult(StrictModel):
 
 @runtime_checkable
 class StudentInviteServicePort(Protocol):
-    def lookup_student_sub_by_email(self, *, student_email: str) -> str | None:
-        """Return Cognito subject for an existing account, else None."""
-
-    def invite_student(
+    async def invite_student(
         self,
         *,
         student_email: str,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -77,8 +78,18 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
             }
         )
 
-    def upsert_student_scope(
+    async def upsert_student_scope(
         self, *, student: Student, teacher_id: str, external_student_id: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._upsert_student_scope_sync,
+            student,
+            teacher_id,
+            external_student_id,
+        )
+
+    def _upsert_student_scope_sync(
+        self, student: Student, teacher_id: str, external_student_id: str
     ) -> None:
         now_iso = datetime.now(UTC).isoformat()
         try:
@@ -146,7 +157,10 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
                 ) from err
             raise
 
-    def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
+    async def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
+        return await asyncio.to_thread(self._get_student_scope_sync, exam_id, student_sub)
+
+    def _get_student_scope_sync(self, exam_id: str, student_sub: str) -> Student | None:
         response = self._table.get_item(
             Key={
                 "PK": f"EXAM#{exam_id}",
@@ -161,22 +175,6 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         if not isinstance(email, str) or not email:
             return None
         return Student(student_id=student_sub, exam_id=exam_id, email=email)
-
-    def get_exam_id_for_student_sub(self, *, student_sub: str) -> str | None:
-        response = self._table.get_item(
-            Key={
-                "PK": f"STUDENT#{student_sub}",
-                "SK": "SCOPE",
-            },
-            ConsistentRead=True,
-        )
-        item = response.get("Item")
-        if not isinstance(item, dict):
-            return None
-        exam_id = item.get("exam_id")
-        if not isinstance(exam_id, str) or not exam_id:
-            return None
-        return exam_id
 
     @staticmethod
     def _is_scope_conflict_error(err: ClientError) -> bool:

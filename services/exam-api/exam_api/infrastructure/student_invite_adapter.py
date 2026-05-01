@@ -87,6 +87,18 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             already_existed=already_existed,
         )
 
+    def lookup_student_sub_by_email(self, *, student_email: str) -> str | None:
+        try:
+            response = self._cognito.admin_get_user(
+                UserPoolId=self._user_pool_id,
+                Username=student_email,
+            )
+        except ClientError as err:
+            if self._extract_error_code(err) == "UserNotFoundException":
+                return None
+            raise
+        return self._extract_user_sub(response, student_email)
+
     def _send_invitation_email(
         self,
         *,

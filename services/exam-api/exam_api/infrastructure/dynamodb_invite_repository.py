@@ -6,11 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from grading_shared.domain.exam import Exam, ExamStatus
 from grading_shared.domain.models import NotationPayload
 from grading_shared.ports import ExamRepositoryPort
 
+from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.domain.student import Student
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
@@ -18,7 +20,9 @@ from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryP
 class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
     def __init__(self, *, table_name: str, dynamodb_resource: Any | None = None) -> None:
         resource = dynamodb_resource or boto3.resource("dynamodb")
+        self._table_name = table_name
         self._table = resource.Table(table_name)
+        self._dynamodb_client = resource.meta.client
 
     def get_exam(self, *, exam_id: str) -> Exam | None:
         response = self._table.get_item(
@@ -77,50 +81,70 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         self, *, student: Student, teacher_id: str, external_student_id: str
     ) -> None:
         now_iso = datetime.now(UTC).isoformat()
-        self._table.update_item(
-            Key={
-                "PK": f"EXAM#{student.exam_id}",
-                "SK": f"STUDENT#{student.student_id}",
-            },
-            UpdateExpression=(
-                "SET teacher_id = :teacher_id, "
-                "student_id = :student_id, "
-                "external_student_id = :external_student_id, "
-                "email = :email, "
-                "updated_at = :updated_at, "
-                "invited_at = if_not_exists(invited_at, :invited_at)"
-            ),
-            ExpressionAttributeValues={
-                ":teacher_id": teacher_id,
-                ":student_id": student.student_id,
-                ":external_student_id": external_student_id,
-                ":email": str(student.email),
-                ":updated_at": now_iso,
-                ":invited_at": now_iso,
-            },
-        )
-        self._table.update_item(
-            Key={
-                "PK": f"STUDENT#{student.student_id}",
-                "SK": "SCOPE",
-            },
-            UpdateExpression=(
-                "SET exam_id = :exam_id, "
-                "teacher_id = :teacher_id, "
-                "external_student_id = :external_student_id, "
-                "email = :email, "
-                "updated_at = :updated_at, "
-                "invited_at = if_not_exists(invited_at, :invited_at)"
-            ),
-            ExpressionAttributeValues={
-                ":exam_id": student.exam_id,
-                ":teacher_id": teacher_id,
-                ":external_student_id": external_student_id,
-                ":email": str(student.email),
-                ":updated_at": now_iso,
-                ":invited_at": now_iso,
-            },
-        )
+        try:
+            self._dynamodb_client.transact_write_items(
+                TransactItems=[
+                    {
+                        "Update": {
+                            "TableName": self._table_name,
+                            "Key": {
+                                "PK": {"S": f"EXAM#{student.exam_id}"},
+                                "SK": {"S": f"STUDENT#{student.student_id}"},
+                            },
+                            "UpdateExpression": (
+                                "SET teacher_id = :teacher_id, "
+                                "student_id = :student_id, "
+                                "external_student_id = :external_student_id, "
+                                "email = :email, "
+                                "updated_at = :updated_at, "
+                                "invited_at = if_not_exists(invited_at, :invited_at)"
+                            ),
+                            "ExpressionAttributeValues": {
+                                ":teacher_id": {"S": teacher_id},
+                                ":student_id": {"S": student.student_id},
+                                ":external_student_id": {"S": external_student_id},
+                                ":email": {"S": str(student.email)},
+                                ":updated_at": {"S": now_iso},
+                                ":invited_at": {"S": now_iso},
+                            },
+                        }
+                    },
+                    {
+                        "Update": {
+                            "TableName": self._table_name,
+                            "Key": {
+                                "PK": {"S": f"STUDENT#{student.student_id}"},
+                                "SK": {"S": "SCOPE"},
+                            },
+                            "UpdateExpression": (
+                                "SET exam_id = :exam_id, "
+                                "teacher_id = :teacher_id, "
+                                "external_student_id = :external_student_id, "
+                                "email = :email, "
+                                "updated_at = :updated_at, "
+                                "invited_at = if_not_exists(invited_at, :invited_at)"
+                            ),
+                            "ConditionExpression": (
+                                "attribute_not_exists(exam_id) OR exam_id = :exam_id"
+                            ),
+                            "ExpressionAttributeValues": {
+                                ":exam_id": {"S": student.exam_id},
+                                ":teacher_id": {"S": teacher_id},
+                                ":external_student_id": {"S": external_student_id},
+                                ":email": {"S": str(student.email)},
+                                ":updated_at": {"S": now_iso},
+                                ":invited_at": {"S": now_iso},
+                            },
+                        }
+                    },
+                ]
+            )
+        except ClientError as err:
+            if self._is_scope_conflict_error(err):
+                raise StudentExamScopeConflictError(
+                    "Student account is already scoped to another exam."
+                ) from err
+            raise
 
     def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
         response = self._table.get_item(
@@ -153,3 +177,20 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         if not isinstance(exam_id, str) or not exam_id:
             return None
         return exam_id
+
+    @staticmethod
+    def _is_scope_conflict_error(err: ClientError) -> bool:
+        code = str(err.response.get("Error", {}).get("Code", ""))
+        if code == "ConditionalCheckFailedException":
+            return True
+        if code != "TransactionCanceledException":
+            return False
+        reasons = err.response.get("CancellationReasons", [])
+        if not isinstance(reasons, list):
+            return False
+        for reason in reasons:
+            if not isinstance(reason, dict):
+                continue
+            if reason.get("Code") == "ConditionalCheckFailed":
+                return True
+        return False

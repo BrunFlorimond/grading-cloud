@@ -43,7 +43,7 @@ def _make_client_error(code: str, message: str) -> ClientError:
 def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
-    app.state.student_invite_service = Mock(spec=["invite_student"])
+    app.state.student_invite_service = Mock(spec=["lookup_student_sub_by_email", "invite_student"])
     invite_repository = Mock()
     invite_repository.get_exam = Mock()
     invite_repository.save_exam = Mock()
@@ -66,12 +66,16 @@ def _build_use_case(
     exam_repository: Mock | None = None,
     student_scope_repository: Mock | None = None,
 ) -> InviteStudentUseCase:
+    invite_adapter = invite_service
+    if invite_adapter is None:
+        invite_adapter = Mock()
+        invite_adapter.lookup_student_sub_by_email.return_value = None
     scope_repository = student_scope_repository
     if scope_repository is None:
         scope_repository = Mock()
         scope_repository.get_exam_id_for_student_sub.return_value = None
     return InviteStudentUseCase(
-        invite_service=invite_service or Mock(),
+        invite_service=invite_adapter,
         exam_repository=exam_repository or Mock(),
         student_scope_repository=scope_repository,
     )
@@ -79,6 +83,7 @@ def _build_use_case(
 
 def test_use_case_returns_new_invite_result() -> None:
     invite_service = Mock()
+    invite_service.lookup_student_sub_by_email.return_value = None
     exam_repository = Mock()
     exam_repository.get_exam.return_value = Exam(
         exam_id="exam-1",
@@ -119,15 +124,19 @@ def test_use_case_returns_new_invite_result() -> None:
         student_email="student@example.com",
         exam_id="exam-1",
     )
-    student_scope_repository.get_exam_id_for_student_sub.assert_called_once_with(
-        student_sub="student-sub-123"
+    invite_service.lookup_student_sub_by_email.assert_called_once_with(
+        student_email="student@example.com"
     )
+    student_scope_repository.get_exam_id_for_student_sub.assert_not_called()
     student_scope_repository.upsert_student_scope.assert_called_once()
 
 
 def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     invite_service = Mock()
+    invite_service.lookup_student_sub_by_email.return_value = "student-sub-existing"
     exam_repository = Mock()
+    student_scope_repository = Mock()
+    student_scope_repository.get_exam_id_for_student_sub.return_value = "exam-1"
     exam_repository.get_exam.return_value = Exam(
         exam_id="exam-1",
         teacher_id="teacher-1",
@@ -138,7 +147,11 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
         cognito_sub="student-sub-existing",
         already_existed=True,
     )
-    use_case = _build_use_case(invite_service=invite_service, exam_repository=exam_repository)
+    use_case = _build_use_case(
+        invite_service=invite_service,
+        exam_repository=exam_repository,
+        student_scope_repository=student_scope_repository,
+    )
 
     result = use_case.execute(
         InviteStudentCommand(
@@ -151,10 +164,15 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
 
     assert result.re_invited is True
     assert result.student.student_id == "student-sub-existing"
+    student_scope_repository.get_exam_id_for_student_sub.assert_called_once_with(
+        student_sub="student-sub-existing"
+    )
+    student_scope_repository.upsert_student_scope.assert_called_once()
 
 
 def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> None:
     invite_service = Mock()
+    invite_service.lookup_student_sub_by_email.return_value = "student-sub-existing"
     exam_repository = Mock()
     student_scope_repository = Mock()
     exam_repository.get_exam.return_value = Exam(
@@ -162,10 +180,6 @@ def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> 
         teacher_id="teacher-1",
         title="Math Midterm",
         status=ExamStatus.DRAFT,
-    )
-    invite_service.invite_student.return_value = PortInviteStudentResult(
-        cognito_sub="student-sub-existing",
-        already_existed=True,
     )
     student_scope_repository.get_exam_id_for_student_sub.return_value = "exam-legacy"
     use_case = _build_use_case(
@@ -184,6 +198,7 @@ def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> 
             )
         )
 
+    invite_service.invite_student.assert_not_called()
     student_scope_repository.upsert_student_scope.assert_not_called()
 
 
@@ -284,6 +299,41 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito.admin_set_user_password.assert_called_once()
     cognito.admin_add_user_to_group.assert_called_once()
     ses.send_email.assert_called_once()
+
+
+def test_adapter_lookup_student_sub_by_email_returns_sub_when_exists() -> None:
+    cognito = Mock()
+    cognito.admin_get_user.return_value = {
+        "UserAttributes": [{"Name": "sub", "Value": "existing-sub"}]
+    }
+    adapter = CognitoSesStudentInviteAdapter(
+        user_pool_id="pool-id",
+        ses_from_address="noreply@example.com",
+        cognito_client=cognito,
+        ses_client=Mock(),
+    )
+
+    student_sub = adapter.lookup_student_sub_by_email(student_email="student@example.com")
+
+    assert student_sub == "existing-sub"
+
+
+def test_adapter_lookup_student_sub_by_email_returns_none_when_user_not_found() -> None:
+    cognito = Mock()
+    cognito.admin_get_user.side_effect = _make_client_error(
+        "UserNotFoundException",
+        "Not found",
+    )
+    adapter = CognitoSesStudentInviteAdapter(
+        user_pool_id="pool-id",
+        ses_from_address="noreply@example.com",
+        cognito_client=cognito,
+        ses_client=Mock(),
+    )
+
+    student_sub = adapter.lookup_student_sub_by_email(student_email="student@example.com")
+
+    assert student_sub is None
 
 
 def test_api_returns_200_on_successful_invite(client: TestClient) -> None:

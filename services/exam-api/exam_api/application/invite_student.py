@@ -45,6 +45,17 @@ class InviteStudentUseCase:
             exam_id=command.exam_id,
             teacher_id=command.teacher_id,
         )
+        existing_student_sub = self._invite_service.lookup_student_sub_by_email(
+            student_email=str(command.student_email)
+        )
+        if existing_student_sub is not None:
+            existing_exam_id = self._student_scope_repository.get_exam_id_for_student_sub(
+                student_sub=existing_student_sub
+            )
+            if existing_exam_id is not None and existing_exam_id != exam.exam_id:
+                raise StudentExamScopeConflictError(
+                    "Student account is already scoped to another exam."
+                )
         invite_result = self._invite_service.invite_student(
             student_email=str(command.student_email),
             exam_id=exam.exam_id,
@@ -54,13 +65,6 @@ class InviteStudentUseCase:
             exam_id=exam.exam_id,
             email=command.student_email,
         )
-        existing_exam_id = self._student_scope_repository.get_exam_id_for_student_sub(
-            student_sub=student.student_id
-        )
-        if existing_exam_id is not None and existing_exam_id != exam.exam_id:
-            raise StudentExamScopeConflictError(
-                "Student account is already scoped to another exam."
-            )
         self._student_scope_repository.upsert_student_scope(
             student=student,
             teacher_id=command.teacher_id,

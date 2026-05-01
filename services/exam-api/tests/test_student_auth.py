@@ -454,6 +454,7 @@ def test_api_student_login_invalid_credentials_returns_401(client: TestClient) -
     )
 
     assert response.status_code == 401
+    assert response.headers.get("WWW-Authenticate") == "Bearer"
     body = response.json()
     assert body["error"] == "bad credentials"
     assert body["code"] == "invalid_credentials"
@@ -510,6 +511,7 @@ def test_api_change_password_invalid_session_returns_401(client: TestClient) -> 
     )
 
     assert response.status_code == 401
+    assert response.headers.get("WWW-Authenticate") == "Bearer"
     assert response.json()["code"] == "invalid_credentials"
 
 

@@ -405,6 +405,7 @@ def test_post_login_401_invalid_credentials(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+    assert response.headers.get("WWW-Authenticate") == "Bearer"
     body = response.json()
     assert body["error"] == "invalid credentials"
     assert body["code"] == "invalid_credentials"

@@ -19,9 +19,21 @@ def register_http_error_handlers(app: FastAPI) -> None:
             return await http_exception_handler(request, exc)
         detail = exc.detail
         if isinstance(detail, dict) and "error" in detail and "code" in detail:
+            if exc.status_code == 401:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content=detail,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             return JSONResponse(status_code=exc.status_code, content=detail)
         if isinstance(detail, str):
             code = "unauthorized" if exc.status_code == 401 else "forbidden"
+            if exc.status_code == 401:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"error": detail, "code": code},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"error": detail, "code": code},

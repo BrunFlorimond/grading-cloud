@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
+import aiobotocore.session
 from fastapi import FastAPI
 
 from exam_api.api.auth_router import router as auth_router
@@ -22,11 +24,25 @@ from exam_api.infrastructure.student_invite_adapter import (
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    app.state.student_invite_service = _build_student_invite_service()
-    app.state.invite_repository = _build_invite_repository()
-    app.state.exam_ownership_repository = _build_exam_ownership_repository()
-    app.state.jwt_verifier = _build_jwt_verifier()
-    yield
+    table_name = os.getenv("GRADING_TABLE_NAME")
+    if not table_name:
+        raise RuntimeError("Missing GRADING_TABLE_NAME configuration.")
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    if not region:
+        raise RuntimeError("Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client.")
+    session = aiobotocore.session.get_session()
+    dynamodb_cm: Any = session.create_client("dynamodb", region_name=region)
+    dynamodb_client = await dynamodb_cm.__aenter__()
+    try:
+        app.state.student_invite_service = _build_student_invite_service()
+        app.state.invite_repository = _build_invite_repository()
+        app.state.exam_ownership_repository = _build_exam_ownership_repository(
+            table_name, dynamodb_client
+        )
+        app.state.jwt_verifier = _build_jwt_verifier()
+        yield
+    finally:
+        await dynamodb_cm.__aexit__(None, None, None)
 
 
 def _build_student_invite_service() -> CognitoSesStudentInviteAdapter:
@@ -49,11 +65,13 @@ def _build_invite_repository() -> DynamoDbInviteRepository:
     return DynamoDbInviteRepository(table_name=table_name)
 
 
-def _build_exam_ownership_repository() -> DynamoDbExamOwnershipRepository:
-    table_name = os.getenv("GRADING_TABLE_NAME")
-    if not table_name:
-        raise RuntimeError("Missing GRADING_TABLE_NAME configuration.")
-    return DynamoDbExamOwnershipRepository(table_name=table_name)
+def _build_exam_ownership_repository(
+    table_name: str, dynamodb_client: Any
+) -> DynamoDbExamOwnershipRepository:
+    return DynamoDbExamOwnershipRepository(
+        table_name=table_name,
+        dynamodb_client=dynamodb_client,
+    )
 
 
 def _build_jwt_verifier() -> CognitoJwtVerifier:

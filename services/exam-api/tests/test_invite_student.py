@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from botocore.exceptions import ClientError
@@ -29,6 +29,7 @@ from exam_api.domain.errors import (
     StudentExamScopeConflictError,
 )
 from exam_api.domain.student import Student
+from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 from exam_api.infrastructure.student_invite_adapter import (
     CognitoSesStudentInviteAdapter,
 )
@@ -61,7 +62,7 @@ def client() -> TestClient:
     invite_repository.upsert_student_scope = AsyncMock()
     invite_repository.get_student_scope = AsyncMock()
     app.state.invite_repository = invite_repository
-    jwt_verifier = Mock(spec=["decode_and_verify_token"])
+    jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
@@ -494,6 +495,7 @@ def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+    assert response.headers.get("WWW-Authenticate") == "Bearer"
     assert response.json()["code"] == "invalid_token"
     mock_use_case.execute.assert_not_called()
 

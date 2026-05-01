@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -28,13 +28,14 @@ from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
     DynamoDbExamOwnershipRepository,
 )
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
+from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 
 @pytest.fixture
 def rbac_app() -> FastAPI:
     app = FastAPI()
     register_http_error_handlers(app)
-    jwt_verifier = Mock(spec=["decode_and_verify_token"])
+    jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     app.state.jwt_verifier = jwt_verifier
 
     @app.get("/teacher-only")

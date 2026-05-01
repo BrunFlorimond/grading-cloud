@@ -172,6 +172,7 @@ async def invite_student(
             detail=str(err),
         ) from err
     except ExamOwnershipError as err:
+        # Defense in depth: dependency checks TEACHER#/EXAM#; use case re-checks exam metadata.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

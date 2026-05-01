@@ -43,9 +43,7 @@ class CurrentStudent(BaseModel):
 
 def _get_jwt_verifier(request: Request) -> JwtVerifierPort:
     verifier = getattr(request.app.state, "jwt_verifier", None)
-    if not isinstance(verifier, JwtVerifierPort) and not hasattr(
-        verifier, "decode_and_verify_token"
-    ):
+    if not isinstance(verifier, JwtVerifierPort):
         raise RuntimeError(
             "Missing JWT verifier — set app.state.jwt_verifier in lifespan."
         )
@@ -170,6 +168,10 @@ def require_own_data(path_param_name: str):
         current_student: Annotated[CurrentStudent, Depends(require_student)],
     ) -> None:
         path_val = request.path_params.get(path_param_name)
+        if path_val is None:
+            raise RuntimeError(
+                f"require_own_data: path parameter {path_param_name!r} is not on this route."
+            )
         if path_val != current_student.student_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

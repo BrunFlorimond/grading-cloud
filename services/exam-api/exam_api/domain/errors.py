@@ -38,15 +38,3 @@ class StudentAlreadyInvitedError(InviteError):
 
 class StudentExamScopeConflictError(InviteError):
     """Raised when an existing student account is bound to another exam scope."""
-
-
-class StudentAuthError(Exception):
-    """Base class for student authentication errors."""
-
-
-class PasswordChallengeRequiredError(StudentAuthError):
-    """Reserved for flows that signal password challenge via exceptions instead of result models."""
-
-    def __init__(self, session: str) -> None:
-        super().__init__("Password change required.")
-        self.session = session

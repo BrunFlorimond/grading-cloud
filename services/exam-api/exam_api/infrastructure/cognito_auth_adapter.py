@@ -232,24 +232,19 @@ class CognitoAuthAdapter(AuthServicePort):
         refresh_token = auth_result.get("RefreshToken")
         expires_in = auth_result.get("ExpiresIn")
 
-        if not isinstance(id_token, str) or not isinstance(refresh_token, str):
+        if (
+            not isinstance(id_token, str)
+            or not isinstance(refresh_token, str)
+            or not isinstance(expires_in, int)
+        ):
             raise InvalidCredentialsError(
                 "Authentication response is missing required tokens."
             )
-        if not isinstance(expires_in, int):
-            try:
-                expires_in_int = int(expires_in)  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                raise InvalidCredentialsError(
-                    "Authentication response is missing token expiry."
-                ) from None
-        else:
-            expires_in_int = expires_in
 
         return AuthTokens(
             id_token=id_token,
             refresh_token=refresh_token,
-            expires_in=expires_in_int,
+            expires_in=expires_in,
         )
 
     @staticmethod

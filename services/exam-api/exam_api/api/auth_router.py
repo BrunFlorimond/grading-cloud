@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -159,6 +160,13 @@ class ChangePasswordRequest(BaseModel):
     session: str
     new_password: SecretStr
 
+    @field_validator("session")
+    @classmethod
+    def _validate_session_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Session token must not be empty.")
+        return value
+
     @field_validator("new_password")
     @classmethod
     def _validate_password_not_empty(cls, value: SecretStr) -> SecretStr:
@@ -252,6 +260,11 @@ async def change_password(
     )
 
 
+@lru_cache(maxsize=1)
+def _cached_cognito_adapter(user_pool_id: str, client_id: str) -> CognitoAuthAdapter:
+    return CognitoAuthAdapter(user_pool_id=user_pool_id, client_id=client_id)
+
+
 def _build_auth_adapter() -> CognitoAuthAdapter:
     user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
     client_id = os.getenv("COGNITO_APP_CLIENT_ID")
@@ -259,4 +272,4 @@ def _build_auth_adapter() -> CognitoAuthAdapter:
         raise RuntimeError(
             "Missing Cognito configuration: set COGNITO_USER_POOL_ID and COGNITO_APP_CLIENT_ID."
         )
-    return CognitoAuthAdapter(user_pool_id=user_pool_id, client_id=client_id)
+    return _cached_cognito_adapter(user_pool_id, client_id)

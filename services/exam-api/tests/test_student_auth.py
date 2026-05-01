@@ -244,6 +244,40 @@ async def test_cognito_adapter_login_student_returns_tokens() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cognito_adapter_login_student_maps_user_not_found() -> None:
+    cognito = Mock()
+    cognito.initiate_auth = AsyncMock(
+        side_effect=_make_client_error("UserNotFoundException", "User not found")
+    )
+    adapter = CognitoAuthAdapter(
+        user_pool_id="pool-id",
+        client_id="app-client-id",
+        client=cognito,
+    )
+
+    with pytest.raises(InvalidCredentialsError):
+        await adapter.login_student(email="unknown@school.edu", password="x")
+
+
+@pytest.mark.asyncio
+async def test_cognito_adapter_login_student_re_raises_unmapped_client_error() -> None:
+    cognito = Mock()
+    cognito.initiate_auth = AsyncMock(
+        side_effect=_make_client_error("TooManyRequestsException", "Throttled")
+    )
+    adapter = CognitoAuthAdapter(
+        user_pool_id="pool-id",
+        client_id="app-client-id",
+        client=cognito,
+    )
+
+    with pytest.raises(ClientError) as exc_info:
+        await adapter.login_student(email="student@school.edu", password="x")
+
+    assert exc_info.value.response["Error"]["Code"] == "TooManyRequestsException"
+
+
+@pytest.mark.asyncio
 async def test_cognito_adapter_login_student_maps_not_authorized() -> None:
     cognito = Mock()
     cognito.initiate_auth = AsyncMock(
@@ -488,7 +522,9 @@ def test_api_change_password_weak_password_returns_400(client: TestClient) -> No
     assert response.json()["detail"] == "too weak"
 
 
-def test_student_jwt_contains_required_claims() -> None:
+@pytest.mark.asyncio
+async def test_student_id_token_from_challenge_response_contains_claims() -> None:
+    """Decode IdToken returned by the adapter (as Cognito would emit it)."""
     header = _encode_segment({"alg": "none", "typ": "JWT"})
     payload = _encode_segment(
         {
@@ -498,11 +534,93 @@ def test_student_jwt_contains_required_claims() -> None:
             "custom:exam_id": "exam-123",
         }
     )
-    token = f"{header}.{payload}."
+    id_token = f"{header}.{payload}."
 
-    claims = _decode_jwt_payload(token)
+    cognito = Mock()
+    cognito.respond_to_auth_challenge = AsyncMock(
+        return_value={
+            "AuthenticationResult": {
+                "IdToken": id_token,
+                "RefreshToken": "refresh.after",
+                "ExpiresIn": 3600,
+            }
+        }
+    )
+    adapter = CognitoAuthAdapter(
+        user_pool_id="pool-id",
+        client_id="app-client-id",
+        client=cognito,
+    )
+
+    tokens = await adapter.respond_to_new_password_challenge(
+        email="student@school.edu",
+        session="sess",
+        new_password="NewStrongPassword123!",
+    )
+
+    claims = _decode_jwt_payload(tokens.id_token)
 
     assert claims["custom:role"] == "student"
     assert claims["sub"] == "student-sub-uuid"
     assert claims["email"] == "student@school.edu"
     assert claims["custom:exam_id"] == "exam-123"
+
+
+@pytest.mark.asyncio
+async def test_after_password_change_student_login_called_with_new_password() -> None:
+    """Structural flow: challenge completion then login with final password (mocked Cognito)."""
+    auth = Mock()
+    auth.respond_to_new_password_challenge = AsyncMock(
+        return_value=AuthTokens(
+            id_token="id.after",
+            refresh_token="refresh.after",
+            expires_in=3600,
+        )
+    )
+    auth.login_student = AsyncMock(
+        return_value=AuthTokens(
+            id_token="id.login",
+            refresh_token="refresh.login",
+            expires_in=3600,
+        )
+    )
+
+    change_uc = ChangeStudentPasswordUseCase(auth_service=auth)
+    await change_uc.execute(
+        ChangeStudentPasswordCommand(
+            email="student@school.edu",
+            session="sess",
+            new_password="FinalStrongPassword123!",
+        )
+    )
+
+    login_uc = LoginStudentUseCase(auth_service=auth)
+    await login_uc.execute(
+        LoginStudentCommand(
+            email="student@school.edu",
+            password="FinalStrongPassword123!",
+        )
+    )
+
+    auth.respond_to_new_password_challenge.assert_awaited_once()
+    auth.login_student.assert_awaited_once_with(
+        email="student@school.edu",
+        password="FinalStrongPassword123!",
+    )
+
+
+def test_api_change_password_empty_session_returns_422(client: TestClient) -> None:
+    mock_use_case = Mock()
+    client.app.dependency_overrides[get_change_password_use_case] = lambda: mock_use_case
+
+    response = client.post(
+        "/auth/change-password",
+        json={
+            "email": "student@school.edu",
+            "session": "   ",
+            "new_password": "NewStrongPassword123!",
+        },
+    )
+
+    assert response.status_code == 422
+    mock_use_case.execute.assert_not_called()

@@ -38,3 +38,23 @@ class StudentAlreadyInvitedError(InviteError):
 
 class StudentExamScopeConflictError(InviteError):
     """Raised when an existing student account is bound to another exam scope."""
+
+
+class ExamValidationError(Exception):
+    """Base class for exam creation validation errors."""
+
+
+class ExamTitleRequiredError(ExamValidationError):
+    """Raised when the exam title is missing or empty."""
+
+
+class ExamTitleTooLongError(ExamValidationError):
+    """Raised when the exam title exceeds the maximum allowed length (120 chars)."""
+
+
+class ExamCreationConflictError(ExamValidationError):
+    """Raised when persisting a new exam hits a conditional write conflict (e.g. duplicate PK)."""
+
+
+class InvalidExamListCursorError(ExamValidationError):
+    """Raised when the pagination cursor cannot be applied to DynamoDB."""

@@ -8,6 +8,9 @@ from .models import StrictModel
 
 
 class ExamStatus(StrEnum):
+    """Initial exam row uses CREATED; legacy rows may still be ``draft``."""
+
+    CREATED = "created"
     DRAFT = "draft"
     READY = "ready"
     INGESTION_RUNNING = "ingestion_running"
@@ -19,6 +22,7 @@ class ExamStatus(StrEnum):
 
 
 _ALLOWED_TRANSITIONS: dict[ExamStatus, set[ExamStatus]] = {
+    ExamStatus.CREATED: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.DRAFT: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.READY: {ExamStatus.INGESTION_RUNNING, ExamStatus.FAILED},
     ExamStatus.INGESTION_RUNNING: {ExamStatus.CORRECTION_RUNNING, ExamStatus.FAILED},
@@ -35,6 +39,9 @@ class Exam(StrictModel):
     teacher_id: str
     title: str
     status: ExamStatus = ExamStatus.DRAFT
+    description: str | None = None
+    subject: str | None = None
+    created_at: str | None = None
 
     def can_transition_to(self, target_status: ExamStatus) -> bool:
         return target_status in _ALLOWED_TRANSITIONS[self.status]

@@ -6,6 +6,7 @@
 - Utiliser Pydantic v2 ConfigDict(extra="forbid", strict=True)
 - Vérifier que les nouveaux ports sont des ABCs dans grading_shared/ports/
 - Types explicites partout (pas de `Any` sauf cas justifié avec commentaire)
+- Écrire le code en async-first : `async def` / `await` et co-routines dès que possible ; éviter les librairies synchrones quand un équivalent async existe
 
 ## Jamais
 

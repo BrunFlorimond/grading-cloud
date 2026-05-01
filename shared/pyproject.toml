@@ -3,7 +3,9 @@ name = "grading_shared"
 version = "0.1.0"
 description = "Shared domain models and ports for grading-cloud services."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13.3",
+]
 
 [build-system]
 requires = ["hatchling"]

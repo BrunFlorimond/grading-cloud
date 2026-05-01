@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from httpx import HTTPError
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr
+from starlette.concurrency import run_in_threadpool
 
 from exam_api.application.invite_student import (
     InviteStudentCommand,
@@ -197,7 +198,7 @@ def provide_invite_use_case(
     response_model=InviteStudentResponse,
     status_code=status.HTTP_200_OK,
 )
-def invite_student(
+async def invite_student(
     exam_id: str,
     student_id: str,
     body: InviteStudentRequest,
@@ -205,13 +206,14 @@ def invite_student(
     use_case: Annotated[InviteStudentUseCase, Depends(provide_invite_use_case)],
 ) -> InviteStudentResponse:
     try:
-        result = use_case.execute(
+        result = await run_in_threadpool(
+            use_case.execute,
             InviteStudentCommand(
                 exam_id=exam_id,
                 student_id=student_id,
                 student_email=body.student_email,
                 teacher_id=current_teacher.teacher_id,
-            )
+            ),
         )
     except ExamNotFoundError as err:
         raise HTTPException(
@@ -235,7 +237,7 @@ def invite_student(
     response_model=StudentScopeResponse,
     status_code=status.HTTP_200_OK,
 )
-def get_student_scope(
+async def get_student_scope(
     exam_id: str,
     student_id: str,
     current_student: Annotated[CurrentStudent, Depends(get_current_student)],
@@ -248,7 +250,8 @@ def get_student_scope(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student token does not match requested resource.",
         )
-    student_scope = student_scope_repository.get_student_scope(
+    student_scope = await run_in_threadpool(
+        student_scope_repository.get_student_scope,
         exam_id=exam_id,
         student_sub=student_id,
     )

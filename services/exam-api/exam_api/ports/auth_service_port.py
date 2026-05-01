@@ -15,6 +15,13 @@ class AuthTokens(StrictModel):
     expires_in: int
 
 
+class AuthChallenge(StrictModel):
+    """Represents a Cognito authentication challenge that must be completed."""
+
+    challenge_name: str
+    session: str
+
+
 @runtime_checkable
 class AuthServicePort(Protocol):
     async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
@@ -23,4 +30,14 @@ class AuthServicePort(Protocol):
 
     async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
         """Authenticate via USER_PASSWORD_AUTH and return JWT tokens."""
+        ...
+
+    async def login_student(self, *, email: str, password: str) -> AuthTokens | AuthChallenge:
+        """Authenticate a student; may return a NEW_PASSWORD_REQUIRED challenge."""
+        ...
+
+    async def respond_to_new_password_challenge(
+        self, *, email: str, session: str, new_password: str
+    ) -> AuthTokens:
+        """Complete a NEW_PASSWORD_REQUIRED challenge and return JWT tokens."""
         ...

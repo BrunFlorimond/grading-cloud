@@ -12,7 +12,7 @@ from exam_api.domain.errors import (
     InvalidCredentialsError,
     WeakPasswordError,
 )
-from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
+from exam_api.ports.auth_service_port import AuthChallenge, AuthServicePort, AuthTokens
 
 
 class CognitoAuthAdapter(AuthServicePort):
@@ -125,6 +125,109 @@ class CognitoAuthAdapter(AuthServicePort):
             raise
 
         auth_result = response.get("AuthenticationResult", {})
+        return self._auth_tokens_from_result(auth_result)
+
+    async def login_student(self, *, email: str, password: str) -> AuthTokens | AuthChallenge:
+        if self._injected_client is not None:
+            return await self._login_student_with_client(
+                self._injected_client,
+                email=email,
+                password=password,
+            )
+        async with self._session.create_client("cognito-idp") as client:
+            return await self._login_student_with_client(
+                client,
+                email=email,
+                password=password,
+            )
+
+    async def _login_student_with_client(
+        self,
+        client: Any,
+        *,
+        email: str,
+        password: str,
+    ) -> AuthTokens | AuthChallenge:
+        try:
+            response = await client.initiate_auth(
+                ClientId=self._client_id,
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={"USERNAME": email, "PASSWORD": password},
+            )
+        except ClientError as err:
+            error_code = self._extract_error_code(err)
+            if error_code in {"NotAuthorizedException", "UserNotFoundException"}:
+                raise InvalidCredentialsError("Invalid email or password.") from err
+            raise
+
+        challenge_name = response.get("ChallengeName")
+        if challenge_name == "NEW_PASSWORD_REQUIRED":
+            session = response.get("Session")
+            if not isinstance(session, str):
+                raise InvalidCredentialsError(
+                    "Authentication response is missing challenge session."
+                )
+            return AuthChallenge(challenge_name=challenge_name, session=session)
+
+        if challenge_name:
+            raise InvalidCredentialsError(
+                "Additional authentication steps are required for this account."
+            )
+
+        auth_result = response.get("AuthenticationResult", {})
+        return self._auth_tokens_from_result(auth_result)
+
+    async def respond_to_new_password_challenge(
+        self, *, email: str, session: str, new_password: str
+    ) -> AuthTokens:
+        if self._injected_client is not None:
+            return await self._respond_to_new_password_with_client(
+                self._injected_client,
+                email=email,
+                session=session,
+                new_password=new_password,
+            )
+        async with self._session.create_client("cognito-idp") as client:
+            return await self._respond_to_new_password_with_client(
+                client,
+                email=email,
+                session=session,
+                new_password=new_password,
+            )
+
+    async def _respond_to_new_password_with_client(
+        self,
+        client: Any,
+        *,
+        email: str,
+        session: str,
+        new_password: str,
+    ) -> AuthTokens:
+        try:
+            response = await client.respond_to_auth_challenge(
+                ClientId=self._client_id,
+                ChallengeName="NEW_PASSWORD_REQUIRED",
+                Session=session,
+                ChallengeResponses={
+                    "USERNAME": email,
+                    "NEW_PASSWORD": new_password,
+                },
+            )
+        except ClientError as err:
+            error_code = self._extract_error_code(err)
+            if error_code == "InvalidPasswordException":
+                message = err.response.get("Error", {}).get(
+                    "Message", "Password does not meet the required policy."
+                )
+                raise WeakPasswordError(message) from err
+            if error_code in {"NotAuthorizedException", "UserNotFoundException"}:
+                raise InvalidCredentialsError("Invalid email or password.") from err
+            raise
+
+        auth_result = response.get("AuthenticationResult", {})
+        return self._auth_tokens_from_result(auth_result)
+
+    def _auth_tokens_from_result(self, auth_result: dict[str, Any]) -> AuthTokens:
         id_token = auth_result.get("IdToken")
         refresh_token = auth_result.get("RefreshToken")
         expires_in = auth_result.get("ExpiresIn")

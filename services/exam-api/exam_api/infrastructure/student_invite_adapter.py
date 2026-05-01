@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-# TODO(#10): no AWS imports in domain/ or ports/ — adapter-only
+import secrets
+import string
 from typing import Any
 
 import boto3  # type: ignore[import-untyped]
@@ -33,13 +34,57 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         student_email: str,
         exam_id: str,
     ) -> InviteStudentResult:
-        # TODO(#10): call self._cognito.admin_create_user with MessageAction="SUPPRESS"
-        # TODO(#10): set UserAttributes: email, custom:role=student, custom:exam_id=exam_id
-        # TODO(#10): catch ClientError UsernameExistsException → set already_existed=True, fetch existing sub
-        # TODO(#10): call self._cognito.admin_add_user_to_group(GroupName="students")
-        # TODO(#10): call self._send_invitation_email(student_email, temporary_password, exam_id)
-        # TODO(#10): return InviteStudentResult(cognito_sub=..., temporary_password=..., already_existed=...)
-        raise NotImplementedError  # noqa: EM101
+        temporary_password = self._generate_temporary_password()
+        already_existed = False
+        try:
+            response = self._cognito.admin_create_user(
+                UserPoolId=self._user_pool_id,
+                Username=student_email,
+                TemporaryPassword=temporary_password,
+                MessageAction="SUPPRESS",
+                UserAttributes=[
+                    {"Name": "email", "Value": student_email},
+                    {"Name": "email_verified", "Value": "true"},
+                    {"Name": "custom:role", "Value": "student"},
+                    {"Name": "custom:exam_id", "Value": exam_id},
+                ],
+            )
+            cognito_sub = self._extract_user_sub(response.get("User", {}), student_email)
+        except ClientError as err:
+            if self._extract_error_code(err) != "UsernameExistsException":
+                raise
+            already_existed = True
+            self._cognito.admin_update_user_attributes(
+                UserPoolId=self._user_pool_id,
+                Username=student_email,
+                UserAttributes=[
+                    {"Name": "custom:role", "Value": "student"},
+                    {"Name": "custom:exam_id", "Value": exam_id},
+                ],
+            )
+            self._cognito.admin_set_user_password(
+                UserPoolId=self._user_pool_id,
+                Username=student_email,
+                Password=temporary_password,
+                Permanent=False,
+            )
+            cognito_sub = self._fetch_user_sub(student_email)
+
+        self._cognito.admin_add_user_to_group(
+            UserPoolId=self._user_pool_id,
+            Username=student_email,
+            GroupName="students",
+        )
+        self._send_invitation_email(
+            to_address=student_email,
+            temporary_password=temporary_password,
+            exam_id=exam_id,
+        )
+        return InviteStudentResult(
+            cognito_sub=cognito_sub,
+            temporary_password=temporary_password,
+            already_existed=already_existed,
+        )
 
     def _send_invitation_email(
         self,
@@ -48,9 +93,61 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         temporary_password: str,
         exam_id: str,
     ) -> None:
-        # TODO(#10): compose SES email body with login URL, temporary_password, exam_id
-        # TODO(#10): call self._ses.send_email(Source=self._ses_from_address, ...)
-        raise NotImplementedError  # noqa: EM101
+        text_body = (
+            "Vous avez ete invite(e) a la plateforme de correction.\n\n"
+            f"Exam ID: {exam_id}\n"
+            f"Email: {to_address}\n"
+            f"Mot de passe temporaire: {temporary_password}\n\n"
+            "Connectez-vous puis modifiez votre mot de passe des la premiere connexion."
+        )
+        html_body = (
+            "<p>Vous avez ete invite(e) a la plateforme de correction.</p>"
+            f"<p><strong>Exam ID:</strong> {exam_id}<br>"
+            f"<strong>Email:</strong> {to_address}<br>"
+            f"<strong>Mot de passe temporaire:</strong> {temporary_password}</p>"
+            "<p>Connectez-vous puis modifiez votre mot de passe des la premiere connexion.</p>"
+        )
+        self._ses.send_email(
+            Source=self._ses_from_address,
+            Destination={"ToAddresses": [to_address]},
+            Message={
+                "Subject": {"Data": "Invitation etudiant grading-cloud"},
+                "Body": {
+                    "Text": {"Data": text_body},
+                    "Html": {"Data": html_body},
+                },
+            },
+        )
+
+    def _fetch_user_sub(self, student_email: str) -> str:
+        response = self._cognito.admin_get_user(
+            UserPoolId=self._user_pool_id,
+            Username=student_email,
+        )
+        return self._extract_user_sub(response, student_email)
+
+    @staticmethod
+    def _extract_user_sub(user_payload: dict[str, Any], student_email: str) -> str:
+        attributes = user_payload.get("Attributes", [])
+        if not isinstance(attributes, list):
+            raise RuntimeError(
+                f"Cognito response for {student_email} does not contain valid attributes."
+            )
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            if attribute.get("Name") != "sub":
+                continue
+            value = attribute.get("Value")
+            if isinstance(value, str) and value:
+                return value
+        raise RuntimeError(f"Missing Cognito sub for invited student {student_email}.")
+
+    @staticmethod
+    def _generate_temporary_password(length: int = 20) -> str:
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        return f"Aa1!{password}"
 
     @staticmethod
     def _extract_error_code(err: ClientError) -> str:

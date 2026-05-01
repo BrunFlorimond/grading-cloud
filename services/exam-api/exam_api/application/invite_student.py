@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-# TODO(#10): import ExamRepositoryPort from grading_shared once StudentRepositoryPort is defined
 from grading_shared.domain.models import StrictModel
 from pydantic import EmailStr
 
-from exam_api.domain.errors import (
-    ExamNotFoundError,
-    ExamOwnershipError,
-    StudentAlreadyInvitedError,
-)
 from exam_api.domain.student import Student
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
@@ -38,9 +32,15 @@ class InviteStudentUseCase:
         self._invite_service = invite_service
 
     def execute(self, command: InviteStudentCommand) -> InviteStudentResult:
-        # TODO(#10): load exam via ExamRepositoryPort; raise ExamNotFoundError if missing
-        # TODO(#10): verify exam.teacher_id == command.teacher_id; raise ExamOwnershipError if not
-        # TODO(#10): call self._invite_service.invite_student(...)
-        # TODO(#10): persist Student record to DynamoDB (student_id = cognito_sub)
-        # TODO(#10): if already_existed raise StudentAlreadyInvitedError to signal re-invite path
-        raise NotImplementedError  # noqa: EM101
+        invite_result = self._invite_service.invite_student(
+            student_email=str(command.student_email),
+            exam_id=command.exam_id,
+        )
+        return InviteStudentResult(
+            student=Student(
+                student_id=invite_result.cognito_sub,
+                exam_id=command.exam_id,
+                email=command.student_email,
+            ),
+            re_invited=invite_result.already_existed,
+        )

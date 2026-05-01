@@ -25,6 +25,19 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          settings: |
+            {
+              "permissionMode": "acceptEdits",
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Glob",
+                  "Grep",
+                  "Bash(git *)",
+                  "Bash(gh *)"
+                ]
+              }
+            }
           prompt: |
             Tu es un tech lead senior qui review une PR sur un projet
             Python/FastAPI avec architecture hexagonale sur AWS.

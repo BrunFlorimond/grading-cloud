@@ -3,7 +3,11 @@ name = "exam-api"
 version = "0.1.0"
 description = "FastAPI orchestration service for grading-cloud."
 requires-python = ">=3.12"
-dependencies = ["grading_shared"]
+dependencies = [
+  "grading_shared",
+  "fastapi>=0.115.0",
+  "boto3>=1.38.0",
+]
 
 [build-system]
 requires = ["hatchling"]

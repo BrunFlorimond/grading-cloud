@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from httpx import HTTPError
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr
-from starlette.concurrency import run_in_threadpool
 
 from exam_api.application.invite_student import (
     InviteStudentCommand,
@@ -52,7 +51,6 @@ class CurrentStudent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     student_id: str
-    exam_id: str
 
 
 class StudentScopeResponse(BaseModel):
@@ -130,18 +128,12 @@ def get_current_student(
             detail="Only students can access this route.",
         )
     student_id = claims.get("sub")
-    exam_id = claims.get("custom:exam_id")
     if not isinstance(student_id, str) or not student_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing student identifier in JWT claims.",
         )
-    if not isinstance(exam_id, str) or not exam_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing exam scope in JWT claims.",
-        )
-    return CurrentStudent(student_id=student_id, exam_id=exam_id)
+    return CurrentStudent(student_id=student_id)
 
 
 def get_student_invite_service(request: Request) -> StudentInviteServicePort:
@@ -208,8 +200,7 @@ async def invite_student(
     use_case: Annotated[InviteStudentUseCase, Depends(provide_invite_use_case)],
 ) -> InviteStudentResponse:
     try:
-        result = await run_in_threadpool(
-            use_case.execute,
+        result = await use_case.execute(
             InviteStudentCommand(
                 exam_id=exam_id,
                 student_id=student_id,
@@ -252,13 +243,12 @@ async def get_student_scope(
         StudentScopeRepositoryPort, Depends(get_student_scope_repository)
     ],
 ) -> StudentScopeResponse:
-    if current_student.exam_id != exam_id or current_student.student_id != student_id:
+    if current_student.student_id != student_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student token does not match requested resource.",
         )
-    student_scope = await run_in_threadpool(
-        student_scope_repository.get_student_scope,
+    student_scope = await student_scope_repository.get_student_scope(
         exam_id=exam_id,
         student_sub=student_id,
     )

@@ -23,11 +23,6 @@ class AuthStack(Stack):
                     max_len=7,
                     mutable=True,
                 ),
-                "exam_id": cognito.StringAttribute(
-                    min_len=1,
-                    max_len=128,
-                    mutable=True,
-                ),
             },
         )
 

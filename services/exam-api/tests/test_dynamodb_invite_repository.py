@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+import pytest
+from botocore.exceptions import ClientError
 from grading_shared.domain.exam import Exam, ExamStatus
 from grading_shared.domain.models import MetaModel, NotationPayload, StudentModel, TotauxModel
 
+from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.domain.student import Student
 from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRepository
 
@@ -39,16 +42,18 @@ def test_get_exam_returns_exam_when_metadata_exists() -> None:
     )
 
 
-def test_upsert_student_scope_writes_student_item() -> None:
+@pytest.mark.asyncio
+async def test_upsert_student_scope_writes_student_item() -> None:
     table = Mock()
     dynamodb = Mock()
     dynamodb.Table.return_value = table
+    dynamodb.meta.client = Mock()
     repository = DynamoDbInviteRepository(
         table_name="grading-table",
         dynamodb_resource=dynamodb,
     )
 
-    repository.upsert_student_scope(
+    await repository.upsert_student_scope(
         student=Student(
             student_id="student-sub-1",
             exam_id="exam-1",
@@ -58,16 +63,68 @@ def test_upsert_student_scope_writes_student_item() -> None:
         external_student_id="roster-17",
     )
 
-    call_kwargs = table.update_item.call_args.kwargs
-    assert call_kwargs["Key"]["PK"] == "EXAM#exam-1"
-    assert call_kwargs["Key"]["SK"] == "STUDENT#student-sub-1"
-    assert "if_not_exists(invited_at, :invited_at)" in call_kwargs["UpdateExpression"]
-    assert call_kwargs["ExpressionAttributeValues"][":teacher_id"] == "teacher-1"
-    assert call_kwargs["ExpressionAttributeValues"][":external_student_id"] == "roster-17"
-    assert call_kwargs["ExpressionAttributeValues"][":email"] == "student@example.com"
+    transact_kwargs = dynamodb.meta.client.transact_write_items.call_args.kwargs
+    assert len(transact_kwargs["TransactItems"]) == 2
+    exam_scope_write = transact_kwargs["TransactItems"][0]["Update"]
+    reverse_scope_write = transact_kwargs["TransactItems"][1]["Update"]
+
+    assert exam_scope_write["Key"]["PK"]["S"] == "EXAM#exam-1"
+    assert exam_scope_write["Key"]["SK"]["S"] == "STUDENT#student-sub-1"
+    assert "if_not_exists(invited_at, :invited_at)" in exam_scope_write["UpdateExpression"]
+    assert exam_scope_write["ExpressionAttributeValues"][":teacher_id"]["S"] == "teacher-1"
+    assert (
+        exam_scope_write["ExpressionAttributeValues"][":external_student_id"]["S"]
+        == "roster-17"
+    )
+    assert exam_scope_write["ExpressionAttributeValues"][":email"]["S"] == "student@example.com"
+
+    assert reverse_scope_write["Key"]["PK"]["S"] == "STUDENT#student-sub-1"
+    assert reverse_scope_write["Key"]["SK"]["S"] == "SCOPE"
+    assert reverse_scope_write["ExpressionAttributeValues"][":exam_id"]["S"] == "exam-1"
+    assert (
+        reverse_scope_write["ConditionExpression"]
+        == "attribute_not_exists(exam_id) OR exam_id = :exam_id"
+    )
 
 
-def test_get_student_scope_returns_student_record() -> None:
+@pytest.mark.asyncio
+async def test_upsert_student_scope_raises_conflict_when_condition_fails() -> None:
+    table = Mock()
+    dynamodb = Mock()
+    dynamodb.Table.return_value = table
+    dynamodb.meta.client = Mock()
+    dynamodb.meta.client.transact_write_items.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "TransactionCanceledException",
+                "Message": "Transaction cancelled",
+            },
+            "CancellationReasons": [
+                {"Code": "None"},
+                {"Code": "ConditionalCheckFailed"},
+            ],
+        },
+        operation_name="TransactWriteItems",
+    )
+    repository = DynamoDbInviteRepository(
+        table_name="grading-table",
+        dynamodb_resource=dynamodb,
+    )
+
+    with pytest.raises(StudentExamScopeConflictError):
+        await repository.upsert_student_scope(
+            student=Student(
+                student_id="student-sub-1",
+                exam_id="exam-2",
+                email="student@example.com",
+            ),
+            teacher_id="teacher-1",
+            external_student_id="roster-17",
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_student_scope_returns_student_record() -> None:
     table = Mock()
     table.get_item.return_value = {
         "Item": {
@@ -83,7 +140,7 @@ def test_get_student_scope_returns_student_record() -> None:
         dynamodb_resource=dynamodb,
     )
 
-    student = repository.get_student_scope(exam_id="exam-1", student_sub="student-sub-1")
+    student = await repository.get_student_scope(exam_id="exam-1", student_sub="student-sub-1")
 
     assert student is not None
     assert student.student_id == "student-sub-1"

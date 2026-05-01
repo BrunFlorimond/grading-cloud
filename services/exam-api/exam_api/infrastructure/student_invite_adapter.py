@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import string
 from typing import Any
@@ -9,7 +10,6 @@ from typing import Any
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.ports.student_invite_port import InviteStudentResult, StudentInviteServicePort
 
 
@@ -29,12 +29,19 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         self._cognito = cognito_client or boto3.client("cognito-idp")
         self._ses = ses_client or boto3.client("ses")
 
-    def invite_student(
+    async def invite_student(
         self,
         *,
         student_email: str,
         exam_id: str,
     ) -> InviteStudentResult:
+        return await asyncio.to_thread(
+            self._invite_student_sync,
+            student_email,
+            exam_id,
+        )
+
+    def _invite_student_sync(self, student_email: str, exam_id: str) -> InviteStudentResult:
         temporary_password = self._generate_temporary_password()
         already_existed = False
         try:
@@ -47,7 +54,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                     {"Name": "email", "Value": student_email},
                     {"Name": "email_verified", "Value": "true"},
                     {"Name": "custom:role", "Value": "student"},
-                    {"Name": "custom:exam_id", "Value": exam_id},
                 ],
             )
             cognito_sub = self._extract_user_sub(response.get("User", {}), student_email)
@@ -59,14 +65,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
             )
-            existing_exam_id = self._extract_user_attribute(
-                existing_user,
-                "custom:exam_id",
-            )
-            if existing_exam_id and existing_exam_id != exam_id:
-                raise StudentExamScopeConflictError(
-                    "Student account is already scoped to another exam."
-                )
             self._cognito.admin_update_user_attributes(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
@@ -129,21 +127,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 },
             },
         )
-
-    @staticmethod
-    def _extract_user_attribute(user_payload: dict[str, Any], name: str) -> str | None:
-        attributes = user_payload.get("UserAttributes") or user_payload.get("Attributes", [])
-        if not isinstance(attributes, list):
-            return None
-        for attribute in attributes:
-            if not isinstance(attribute, dict):
-                continue
-            if attribute.get("Name") != name:
-                continue
-            value = attribute.get("Value")
-            if isinstance(value, str) and value:
-                return value
-        return None
 
     @staticmethod
     def _extract_user_sub(user_payload: dict[str, Any], student_email: str) -> str:

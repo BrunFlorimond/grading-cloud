@@ -16,7 +16,7 @@ class InviteStudentResult(StrictModel):
 
 @runtime_checkable
 class StudentInviteServicePort(Protocol):
-    def invite_student(
+    async def invite_student(
         self,
         *,
         student_email: str,
@@ -26,7 +26,7 @@ class StudentInviteServicePort(Protocol):
 
         - If the student already exists in Cognito: resend the email, do NOT recreate account.
         - Cognito user must be added to the `students` group.
-        - Cognito custom attributes: `custom:role=student`, `custom:exam_id=<exam_id>`.
+        - Cognito custom attributes: `custom:role=student`.
         - TODO(#10): decide on MessageAction=SUPPRESS + custom SES email vs. Cognito built-in.
         """
         ...

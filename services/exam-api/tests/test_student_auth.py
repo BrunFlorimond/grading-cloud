@@ -16,6 +16,7 @@ from exam_api.api.auth_router import (
     get_login_student_use_case,
     router,
 )
+from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.change_student_password import (
     ChangeStudentPasswordCommand,
     ChangeStudentPasswordResult,
@@ -55,6 +56,7 @@ def _decode_jwt_payload(token: str) -> dict[str, str]:
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
+    register_http_error_handlers(app)
     app.include_router(router)
     test_client = TestClient(app)
     try:
@@ -452,7 +454,9 @@ def test_api_student_login_invalid_credentials_returns_401(client: TestClient) -
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "bad credentials"
+    body = response.json()
+    assert body["error"] == "bad credentials"
+    assert body["code"] == "invalid_credentials"
 
 
 def test_api_change_password_returns_tokens(client: TestClient) -> None:
@@ -466,7 +470,9 @@ def test_api_change_password_returns_tokens(client: TestClient) -> None:
             )
         )
     )
-    client.app.dependency_overrides[get_change_password_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_change_password_use_case] = lambda: (
+        mock_use_case
+    )
 
     response = client.post(
         "/auth/change-password",
@@ -490,7 +496,9 @@ def test_api_change_password_invalid_session_returns_401(client: TestClient) -> 
     mock_use_case.execute = AsyncMock(
         side_effect=InvalidCredentialsError("session expired")
     )
-    client.app.dependency_overrides[get_change_password_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_change_password_use_case] = lambda: (
+        mock_use_case
+    )
 
     response = client.post(
         "/auth/change-password",
@@ -502,12 +510,15 @@ def test_api_change_password_invalid_session_returns_401(client: TestClient) -> 
     )
 
     assert response.status_code == 401
+    assert response.json()["code"] == "invalid_credentials"
 
 
 def test_api_change_password_weak_password_returns_400(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock(side_effect=WeakPasswordError("too weak"))
-    client.app.dependency_overrides[get_change_password_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_change_password_use_case] = lambda: (
+        mock_use_case
+    )
 
     response = client.post(
         "/auth/change-password",
@@ -611,7 +622,9 @@ async def test_after_password_change_student_login_called_with_new_password() ->
 
 def test_api_change_password_empty_session_returns_422(client: TestClient) -> None:
     mock_use_case = Mock()
-    client.app.dependency_overrides[get_change_password_use_case] = lambda: mock_use_case
+    client.app.dependency_overrides[get_change_password_use_case] = lambda: (
+        mock_use_case
+    )
 
     response = client.post(
         "/auth/change-password",

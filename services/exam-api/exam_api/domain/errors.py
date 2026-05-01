@@ -40,7 +40,6 @@ class StudentExamScopeConflictError(InviteError):
     """Raised when an existing student account is bound to another exam scope."""
 
 
-# TODO(#12): implement RBAC error hierarchy used by centralized dependency guards
 class RbacError(Exception):
     """Base class for role-based access control errors."""
 

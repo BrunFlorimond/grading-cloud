@@ -4,24 +4,31 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from grading_shared.ports import ExamRepositoryPort
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from httpx import HTTPError
-from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from exam_api.api.dependencies import (
+    CurrentTeacher,
+    require_own_data,
+    require_teacher,
+)
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentUseCase,
+)
+from exam_api.application.verify_exam_ownership import (
+    VerifyExamOwnershipCommand,
+    VerifyExamOwnershipUseCase,
 )
 from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
     StudentExamScopeConflictError,
 )
-from exam_api.ports.jwt_verifier_port import JwtVerifierPort
-from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
+from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
+from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
 router = APIRouter(prefix="/exams", tags=["invite"])
 
@@ -41,99 +48,12 @@ class InviteStudentResponse(BaseModel):
     re_invited: bool
 
 
-class CurrentTeacher(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    teacher_id: str
-
-
-class CurrentStudent(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    student_id: str
-
-
 class StudentScopeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     student_id: str
     exam_id: str
     email: EmailStr
-
-
-async def get_current_teacher(
-    request: Request,
-    authorization: Annotated[str | None, Header()] = None,
-) -> CurrentTeacher:
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header.",
-        )
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header must use Bearer token.",
-        )
-    jwt_verifier = get_jwt_verifier(request)
-    try:
-        claims = await jwt_verifier.decode_and_verify_token(token)
-    except (HTTPError, JWTError) as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid JWT token.",
-        ) from err
-    role = claims.get("custom:role")
-    teacher_id = claims.get("sub")
-    if role != "teacher":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only teachers can invite students.",
-        )
-    if not isinstance(teacher_id, str) or not teacher_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing teacher identifier in JWT claims.",
-        )
-    return CurrentTeacher(teacher_id=teacher_id)
-
-
-async def get_current_student(
-    request: Request,
-    authorization: Annotated[str | None, Header()] = None,
-) -> CurrentStudent:
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header.",
-        )
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header must use Bearer token.",
-        )
-    jwt_verifier = get_jwt_verifier(request)
-    try:
-        claims = await jwt_verifier.decode_and_verify_token(token)
-    except (HTTPError, JWTError) as err:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid JWT token.",
-        ) from err
-    if claims.get("custom:role") != "student":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can access this route.",
-        )
-    student_id = claims.get("sub")
-    if not isinstance(student_id, str) or not student_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing student identifier in JWT claims.",
-        )
-    return CurrentStudent(student_id=student_id)
 
 
 def get_student_invite_service(request: Request) -> StudentInviteServicePort:
@@ -154,6 +74,15 @@ def get_invite_repository(request: Request) -> ExamRepositoryPort:
     return repository
 
 
+def get_exam_ownership_repository(request: Request) -> ExamOwnershipPort:
+    repository = getattr(request.app.state, "exam_ownership_repository", None)
+    if not isinstance(repository, ExamOwnershipPort):
+        raise RuntimeError(
+            "Missing exam ownership configuration. Set app.state.exam_ownership_repository."
+        )
+    return repository
+
+
 def get_student_scope_repository(
     repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
 ) -> StudentScopeRepositoryPort:
@@ -164,17 +93,45 @@ def get_student_scope_repository(
     return repository
 
 
-def get_jwt_verifier(request: Request) -> JwtVerifierPort:
-    verifier = getattr(request.app.state, "jwt_verifier", None)
-    if not isinstance(verifier, JwtVerifierPort) and not hasattr(
-        verifier, "decode_and_verify_token"
-    ):
-        raise RuntimeError("Missing JWT verifier configuration.")
-    return verifier
+def get_verify_exam_ownership_use_case(
+    exam_ownership_repository: Annotated[
+        ExamOwnershipPort,
+        Depends(get_exam_ownership_repository),
+    ],
+) -> VerifyExamOwnershipUseCase:
+    return VerifyExamOwnershipUseCase(exam_ownership_repository)
+
+
+async def verify_teacher_exam_ownership(
+    exam_id: str,
+    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
+    use_case: Annotated[
+        VerifyExamOwnershipUseCase,
+        Depends(get_verify_exam_ownership_use_case),
+    ],
+) -> None:
+    """Ensures the DynamoDB TEACHER#/EXAM# edge exists for this teacher and exam."""
+    try:
+        await use_case.execute(
+            VerifyExamOwnershipCommand(
+                teacher_id=current_teacher.teacher_id,
+                exam_id=exam_id,
+            )
+        )
+    except ExamOwnershipError as err:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": str(err),
+                "code": "exam_ownership",
+            },
+        ) from err
 
 
 def provide_invite_use_case(
-    invite_service: Annotated[StudentInviteServicePort, Depends(get_student_invite_service)],
+    invite_service: Annotated[
+        StudentInviteServicePort, Depends(get_student_invite_service)
+    ],
     exam_repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
     student_scope_repository: Annotated[
         StudentScopeRepositoryPort, Depends(get_student_scope_repository)
@@ -196,7 +153,8 @@ async def invite_student(
     exam_id: str,
     student_id: str,
     body: InviteStudentRequest,
-    current_teacher: Annotated[CurrentTeacher, Depends(get_current_teacher)],
+    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
+    _: Annotated[None, Depends(verify_teacher_exam_ownership)],
     use_case: Annotated[InviteStudentUseCase, Depends(provide_invite_use_case)],
 ) -> InviteStudentResponse:
     try:
@@ -216,7 +174,10 @@ async def invite_student(
     except ExamOwnershipError as err:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(err),
+            detail={
+                "error": str(err),
+                "code": "exam_ownership",
+            },
         ) from err
     except StudentExamScopeConflictError as err:
         raise HTTPException(
@@ -238,16 +199,11 @@ async def invite_student(
 async def get_student_scope(
     exam_id: str,
     student_id: str,
-    current_student: Annotated[CurrentStudent, Depends(get_current_student)],
+    _: Annotated[None, Depends(require_own_data("student_id"))],
     student_scope_repository: Annotated[
         StudentScopeRepositoryPort, Depends(get_student_scope_repository)
     ],
 ) -> StudentScopeResponse:
-    if current_student.student_id != student_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Student token does not match requested resource.",
-        )
     student_scope = await student_scope_repository.get_student_scope(
         exam_id=exam_id,
         student_sub=student_id,

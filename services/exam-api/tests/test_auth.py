@@ -16,6 +16,7 @@ from exam_api.api.auth_router import (
     get_register_use_case,
     router,
 )
+from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.login_teacher import (
     LoginTeacherCommand,
     LoginTeacherResult,
@@ -60,6 +61,7 @@ def _decode_jwt_payload(token: str) -> dict[str, str]:
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
+    register_http_error_handlers(app)
     app.include_router(router)
     test_client = TestClient(app)
     try:
@@ -346,7 +348,9 @@ def test_post_register_409_duplicate_email(client: TestClient) -> None:
 
 def test_post_register_400_weak_password(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute = AsyncMock(side_effect=WeakPasswordError("Password too weak"))
+    mock_use_case.execute = AsyncMock(
+        side_effect=WeakPasswordError("Password too weak")
+    )
     client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
 
     response = client.post(
@@ -401,7 +405,9 @@ def test_post_login_401_invalid_credentials(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "invalid credentials"
+    body = response.json()
+    assert body["error"] == "invalid credentials"
+    assert body["code"] == "invalid_credentials"
 
 
 def test_jwt_contains_required_claims() -> None:

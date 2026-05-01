@@ -20,5 +20,11 @@ class VerifyExamOwnershipUseCase:
         self._repo = exam_ownership_repository
 
     async def execute(self, command: VerifyExamOwnershipCommand) -> None:
-        # TODO(#12): call self._repo.teacher_owns_exam and raise ExamOwnershipError when False
-        raise NotImplementedError
+        owns = await self._repo.teacher_owns_exam(
+            teacher_id=command.teacher_id,
+            exam_id=command.exam_id,
+        )
+        if not owns:
+            raise ExamOwnershipError(
+                f"Teacher {command.teacher_id} does not own exam {command.exam_id}."
+            )

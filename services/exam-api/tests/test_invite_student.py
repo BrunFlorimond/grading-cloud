@@ -11,11 +11,12 @@ from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 from jose import JWTError
 
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
+from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import (
-    CurrentTeacher,
-    get_current_teacher,
     provide_invite_use_case,
     router,
+    verify_teacher_exam_ownership,
 )
 from exam_api.application.invite_student import (
     InviteStudentCommand,
@@ -28,8 +29,12 @@ from exam_api.domain.errors import (
     StudentExamScopeConflictError,
 )
 from exam_api.domain.student import Student
-from exam_api.infrastructure.student_invite_adapter import CognitoSesStudentInviteAdapter
-from exam_api.ports.student_invite_port import InviteStudentResult as PortInviteStudentResult
+from exam_api.infrastructure.student_invite_adapter import (
+    CognitoSesStudentInviteAdapter,
+)
+from exam_api.ports.student_invite_port import (
+    InviteStudentResult as PortInviteStudentResult,
+)
 
 
 def _make_client_error(code: str, message: str) -> ClientError:
@@ -39,9 +44,14 @@ def _make_client_error(code: str, message: str) -> ClientError:
     )
 
 
+async def _noop_verify_teacher_exam_ownership() -> None:
+    return None
+
+
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
+    register_http_error_handlers(app)
     app.include_router(router)
     app.state.student_invite_service = Mock(spec=["invite_student"])
     invite_repository = Mock()
@@ -60,6 +70,9 @@ def client() -> TestClient:
         }
     )
     app.state.jwt_verifier = jwt_verifier
+    app.dependency_overrides[verify_teacher_exam_ownership] = (
+        _noop_verify_teacher_exam_ownership
+    )
     test_client = TestClient(app)
     try:
         yield test_client
@@ -286,7 +299,9 @@ async def test_adapter_creates_cognito_user_and_sends_email() -> None:
         ses_client=ses,
     )
 
-    result = await adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
+    result = await adapter.invite_student(
+        student_email="student@example.com", exam_id="exam-1"
+    )
 
     assert result.cognito_sub == "student-sub-123"
     assert result.already_existed is False
@@ -340,7 +355,9 @@ async def test_adapter_handles_existing_user_without_duplicate_account() -> None
         ses_client=ses,
     )
 
-    result = await adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
+    result = await adapter.invite_student(
+        student_email="student@example.com", exam_id="exam-1"
+    )
 
     assert result.cognito_sub == "existing-sub"
     assert result.already_existed is True
@@ -363,7 +380,7 @@ def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
         )
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
-    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
     )
 
@@ -395,7 +412,7 @@ def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
         )
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
-    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
     )
 
@@ -412,7 +429,7 @@ def test_api_returns_404_when_exam_not_found(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock(side_effect=ExamNotFoundError("exam not found"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
-    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
     )
 
@@ -429,7 +446,7 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock(side_effect=ExamOwnershipError("forbidden"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
-    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
     )
 
@@ -439,14 +456,17 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "forbidden"
+    assert response.json()["error"] == "forbidden"
+    assert response.json()["code"] == "exam_ownership"
 
 
 def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute = AsyncMock(side_effect=StudentExamScopeConflictError("scope conflict"))
+    mock_use_case.execute = AsyncMock(
+        side_effect=StudentExamScopeConflictError("scope conflict")
+    )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
-    client.app.dependency_overrides[get_current_teacher] = lambda: CurrentTeacher(
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
         teacher_id="teacher-1"
     )
 
@@ -474,6 +494,7 @@ def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+    assert response.json()["code"] == "invalid_token"
     mock_use_case.execute.assert_not_called()
 
 
@@ -544,9 +565,12 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     )
 
     assert response.status_code == 403
+    assert response.json()["code"] == "own_data_violation"
 
 
-def test_student_scope_endpoint_ignores_custom_exam_id_claim(client: TestClient) -> None:
+def test_student_scope_endpoint_ignores_custom_exam_id_claim(
+    client: TestClient,
+) -> None:
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "student-sub-123",

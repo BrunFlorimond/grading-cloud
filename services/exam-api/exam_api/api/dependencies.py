@@ -46,7 +46,9 @@ def _get_jwt_verifier(request: Request) -> JwtVerifierPort:
     if not isinstance(verifier, JwtVerifierPort) and not hasattr(
         verifier, "decode_and_verify_token"
     ):
-        raise RuntimeError("Missing JWT verifier — set app.state.jwt_verifier in lifespan.")
+        raise RuntimeError(
+            "Missing JWT verifier — set app.state.jwt_verifier in lifespan."
+        )
     return verifier
 
 
@@ -61,13 +63,15 @@ def _bearer_token(authorization: str | None) -> str:
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "Authorization header must use Bearer scheme.", "code": "bad_scheme"},
+            detail={
+                "error": "Authorization header must use Bearer scheme.",
+                "code": "bad_scheme",
+            },
         )
     return token
 
 
 async def _decode_token(token: str, jwt_verifier: JwtVerifierPort) -> dict:
-    # TODO(#12): replace bare except with targeted exception types after integration tests exist
     try:
         return await jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
@@ -90,8 +94,28 @@ async def require_teacher(
 
     Raises 401 when the token is absent/invalid, 403 when the role is wrong.
     """
-    # TODO(#12): implement — extract token, decode, assert role == "teacher"
-    raise NotImplementedError
+    token = _bearer_token(authorization)
+    jwt_verifier = _get_jwt_verifier(request)
+    claims = await _decode_token(token, jwt_verifier)
+    role = claims.get("custom:role")
+    if role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "Teacher role required.",
+                "code": "insufficient_role",
+            },
+        )
+    teacher_id = claims.get("sub")
+    if not isinstance(teacher_id, str) or not teacher_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "Missing teacher identifier in JWT claims.",
+                "code": "missing_subject",
+            },
+        )
+    return CurrentTeacher(teacher_id=teacher_id)
 
 
 async def require_student(
@@ -102,29 +126,57 @@ async def require_student(
 
     Raises 401 when the token is absent/invalid, 403 when the role is wrong.
     """
-    # TODO(#12): implement — extract token, decode, assert role == "student"
-    raise NotImplementedError
+    token = _bearer_token(authorization)
+    jwt_verifier = _get_jwt_verifier(request)
+    claims = await _decode_token(token, jwt_verifier)
+    role = claims.get("custom:role")
+    if role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "Student role required.",
+                "code": "insufficient_role",
+            },
+        )
+    student_id = claims.get("sub")
+    if not isinstance(student_id, str) or not student_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "Missing student identifier in JWT claims.",
+                "code": "missing_subject",
+            },
+        )
+    return CurrentStudent(student_id=student_id)
 
 
-def require_own_data(student_id_path_param: str):
-    """Dependency factory: student JWT sub must match the URL path student_id.
+def require_own_data(path_param_name: str):
+    """Dependency factory: student JWT sub must match the named path parameter.
 
     Usage::
-        @router.get("/{student_id}/results")
-        async def get_results(
+
+        @router.get("/{student_id}/scope")
+        async def get_scope(
+            exam_id: str,
             student_id: str,
-            current_student: Annotated[CurrentStudent, Depends(require_student)],
             _: Annotated[None, Depends(require_own_data("student_id"))],
         ): ...
 
     Raises 403 when the authenticated student differs from the path parameter.
     """
 
-    # TODO(#12): implement — compare current_student.student_id with the resolved path param
     async def _guard(
         request: Request,
         current_student: Annotated[CurrentStudent, Depends(require_student)],
     ) -> None:
-        raise NotImplementedError
+        path_val = request.path_params.get(path_param_name)
+        if path_val != current_student.student_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "Cannot access another student's resource.",
+                    "code": "own_data_violation",
+                },
+            )
 
     return _guard

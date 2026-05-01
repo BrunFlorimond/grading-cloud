@@ -23,6 +23,12 @@ class FileStoragePort(Protocol):
 
 @runtime_checkable
 class ExamRepositoryPort(Protocol):
+    """Persist and load exam aggregates (async since issue #59).
+
+    Only ``exam-api`` ships an implementation today. Other services must use
+    matching ``async def`` methods before calling these APIs from async code.
+    """
+
     async def save_exam(self, exam: Exam) -> None:
         """Persist an exam aggregate."""
 

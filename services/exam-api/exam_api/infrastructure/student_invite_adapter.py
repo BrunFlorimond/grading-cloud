@@ -27,6 +27,10 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         self._user_pool_id = user_pool_id
         self._ses_from_address = ses_from_address
         self._session = session or aiobotocore.session.get_session()
+        if (cognito_client is None) != (ses_client is None):
+            raise ValueError(
+                "cognito_client and ses_client must both be injected or both omitted."
+            )
         self._injected_cognito = cognito_client
         self._injected_ses = ses_client
 

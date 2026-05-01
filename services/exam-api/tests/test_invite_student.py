@@ -302,6 +302,16 @@ async def test_adapter_creates_cognito_user_and_sends_email() -> None:
     ses.send_email.assert_awaited_once()
 
 
+def test_adapter_rejects_partial_injected_clients() -> None:
+    with pytest.raises(ValueError, match="both be injected or both omitted"):
+        CognitoSesStudentInviteAdapter(
+            user_pool_id="pool-id",
+            ses_from_address="noreply@example.com",
+            cognito_client=Mock(),
+            ses_client=None,
+        )
+
+
 @pytest.mark.asyncio
 async def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito = Mock()

@@ -15,6 +15,32 @@ from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRep
 
 
 @pytest.mark.asyncio
+async def test_save_exam_put_item_with_expected_keys() -> None:
+    client = AsyncMock()
+    client.put_item = AsyncMock()
+    repository = DynamoDbInviteRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+    exam = Exam(
+        exam_id="exam-1",
+        teacher_id="teacher-1",
+        title="Midterm",
+        status=ExamStatus.DRAFT,
+    )
+
+    await repository.save_exam(exam)
+
+    item = client.put_item.call_args.kwargs["Item"]
+    assert item["PK"]["S"] == "EXAM#exam-1"
+    assert item["SK"]["S"] == "METADATA"
+    assert item["teacher_id"]["S"] == "teacher-1"
+    assert item["title"]["S"] == "Midterm"
+    assert item["status"]["S"] == ExamStatus.DRAFT.value
+    client.put_item.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_get_exam_returns_exam_when_metadata_exists() -> None:
     client = AsyncMock()
     client.get_item = AsyncMock(

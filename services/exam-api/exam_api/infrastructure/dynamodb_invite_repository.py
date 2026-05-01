@@ -8,7 +8,6 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable, TypeVar
 
 import aiobotocore.session
-from boto3.dynamodb.types import TypeDeserializer, TypeSerializer  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from grading_shared.domain.exam import Exam, ExamStatus
@@ -19,24 +18,58 @@ from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.domain.student import Student
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
-_deserializer = TypeDeserializer()
-_serializer = TypeSerializer()
-
 T = TypeVar("T")
 
 
-def _floats_to_decimal(value: Any) -> Any:
+def _ddb_deserialize(attr: dict[str, Any]) -> Any:
+    """Decode one DynamoDB AttributeValue dict (low-level wire format) to Python."""
+    if len(attr) != 1:
+        raise ValueError(f"Expected exactly one type key in AttributeValue, got {attr!r}")
+    key, val = next(iter(attr.items()))
+    if key == "S":
+        return val
+    if key == "N":
+        return Decimal(val)
+    if key == "BOOL":
+        return bool(val)
+    if key == "NULL":
+        return None
+    if key == "M":
+        if not isinstance(val, dict):
+            raise TypeError("Invalid DynamoDB M value")
+        return {k: _ddb_deserialize(v) for k, v in val.items()}
+    if key == "L":
+        if not isinstance(val, list):
+            raise TypeError("Invalid DynamoDB L value")
+        return [_ddb_deserialize(v) for v in val]
+    raise ValueError(f"Unsupported DynamoDB attribute type {key!r}")
+
+
+def _ddb_serialize(value: Any) -> dict[str, Any]:
+    """Encode a Python value to DynamoDB AttributeValue (subset used by this repo)."""
+    if value is None:
+        return {"NULL": True}
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if isinstance(value, str):
+        return {"S": value}
+    if isinstance(value, int) and not isinstance(value, bool):
+        return {"N": str(value)}
+    if isinstance(value, Decimal):
+        return {"N": format(value, "f")}
     if isinstance(value, float):
-        return Decimal(str(value))
+        return {"N": format(Decimal(str(value)), "f")}
     if isinstance(value, dict):
-        return {k: _floats_to_decimal(v) for k, v in value.items()}
+        return {"M": {k: _ddb_serialize(v) for k, v in value.items()}}
     if isinstance(value, list):
-        return [_floats_to_decimal(v) for v in value]
-    return value
+        return {"L": [_ddb_serialize(v) for v in value]}
+    if isinstance(value, tuple):
+        return {"L": [_ddb_serialize(v) for v in value]}
+    raise TypeError(f"Unsupported Python type for DynamoDB encoding: {type(value)!r}")
 
 
 def _deserialize_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {k: _deserializer.deserialize(v) for k, v in item.items()}
+    return {k: _ddb_deserialize(v) for k, v in item.items()}
 
 
 class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
@@ -52,7 +85,13 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         self._injected_client = dynamodb_client
 
     def _region_name(self) -> str:
-        return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        if not region:
+            raise EnvironmentError(
+                "Set AWS_REGION or AWS_DEFAULT_REGION when using DynamoDbInviteRepository "
+                "without an injected dynamodb client."
+            )
+        return region
 
     async def _use_client(
         self, fn: Callable[[Any], Awaitable[T]],
@@ -112,7 +151,7 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
             "title": exam.title,
             "status": exam.status.value,
         }
-        item = {k: _serializer.serialize(v) for k, v in raw.items()}
+        item = {k: _ddb_serialize(v) for k, v in raw.items()}
 
         async def _put(client: Any) -> None:
             await client.put_item(TableName=self._table_name, Item=item)
@@ -122,13 +161,13 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
     async def save_notation_payload(
         self, *, exam_id: str, student_id: str, payload: NotationPayload
     ) -> None:
-        dumped = _floats_to_decimal(payload.model_dump(mode="json"))
+        dumped = payload.model_dump(mode="json")
         raw = {
             "PK": f"EXAM#{exam_id}",
             "SK": f"NOTATION#{student_id}",
             "payload": dumped,
         }
-        item = {k: _serializer.serialize(v) for k, v in raw.items()}
+        item = {k: _ddb_serialize(v) for k, v in raw.items()}
 
         async def _put(client: Any) -> None:
             await client.put_item(TableName=self._table_name, Item=item)

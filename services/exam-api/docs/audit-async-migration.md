@@ -1,6 +1,8 @@
 # Audit — migration async (issue #59)
 
-État au merge : migration **terminée** pour les endpoints et adapters listés ci‑dessous (aiobotocore + `httpx.AsyncClient`, dépendances FastAPI JWT en `async`).
+État pour **`exam-api`** : migration **terminée** pour les endpoints et adapters ci‑dessous (`aiobotocore`, `httpx.AsyncClient`, JWT via `await`). Si le titre GitHub de la PR dit encore « scaffold », il est **obsolète** — mettre le titre/description à jour lors du merge pour éviter toute ambiguïté.
+
+**Port partagé `ExamRepositoryPort` :** seul `exam-api` implémente ce port aujourd’hui ; les autres services ne sont pas impactés tant qu’ils n’ajoutent pas une implémentation synchrone.
 
 ## Légende
 

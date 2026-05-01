@@ -8,6 +8,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
 
+from exam_api.application.change_student_password import (
+    ChangeStudentPasswordCommand,
+    ChangeStudentPasswordUseCase,
+)
+from exam_api.application.login_student import LoginStudentCommand, LoginStudentUseCase
 from exam_api.application.login_teacher import LoginTeacherCommand, LoginTeacherUseCase
 from exam_api.application.register_teacher import (
     RegisterTeacherCommand,
@@ -131,6 +136,84 @@ async def login(
         refresh_token=result.tokens.refresh_token,
         expires_in=result.tokens.expires_in,
     )
+
+
+# ---------------------------------------------------------------------------
+# Student login (may return NEW_PASSWORD_REQUIRED challenge)
+# TODO(#11): if LoginResponse schema changes, update existing teachers login too.
+# ---------------------------------------------------------------------------
+
+class StudentLoginResponse(BaseModel):
+    """Response for POST /auth/login when the student has a temporary password."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    # TODO(#11): decide on discriminated-union vs separate endpoints;
+    #            for now id_token is None when a challenge is returned.
+    id_token: str | None = None
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    challenge_name: str | None = None
+    session: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    email: EmailStr
+    session: str
+    new_password: SecretStr
+
+    @field_validator("new_password")
+    @classmethod
+    def _validate_password_not_empty(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("New password must not be empty.")
+        return value
+
+
+class ChangePasswordResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id_token: str
+    refresh_token: str
+    expires_in: int
+
+
+def get_login_student_use_case() -> LoginStudentUseCase:
+    return LoginStudentUseCase(auth_service=_build_auth_adapter())
+
+
+def get_change_password_use_case() -> ChangeStudentPasswordUseCase:
+    return ChangeStudentPasswordUseCase(auth_service=_build_auth_adapter())
+
+
+# TODO(#11): implement — call LoginStudentUseCase; if result.challenge is set,
+#            return StudentLoginResponse with challenge_name + session;
+#            otherwise return StudentLoginResponse with id_token + refresh_token + expires_in.
+@router.post(
+    "/student-login",
+    response_model=StudentLoginResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def student_login(
+    body: LoginRequest,
+    use_case: Annotated[LoginStudentUseCase, Depends(get_login_student_use_case)],
+) -> StudentLoginResponse:
+    # TODO(#11): implement handler body
+    raise NotImplementedError
+
+
+# TODO(#11): implement — call ChangeStudentPasswordUseCase;
+#            on WeakPasswordError → 400, InvalidCredentialsError → 401.
+@router.post(
+    "/change-password",
+    response_model=ChangePasswordResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def change_password(
+    body: ChangePasswordRequest,
+    use_case: Annotated[ChangeStudentPasswordUseCase, Depends(get_change_password_use_case)],
+) -> ChangePasswordResponse:
+    # TODO(#11): implement handler body
+    raise NotImplementedError
 
 
 def _build_auth_adapter() -> CognitoAuthAdapter:

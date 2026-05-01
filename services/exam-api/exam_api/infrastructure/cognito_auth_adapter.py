@@ -12,7 +12,7 @@ from exam_api.domain.errors import (
     InvalidCredentialsError,
     WeakPasswordError,
 )
-from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
+from exam_api.ports.auth_service_port import AuthChallenge, AuthServicePort, AuthTokens
 
 
 class CognitoAuthAdapter(AuthServicePort):
@@ -143,6 +143,24 @@ class CognitoAuthAdapter(AuthServicePort):
             refresh_token=refresh_token,
             expires_in=expires_in,
         )
+
+    async def login_student(self, *, email: str, password: str) -> AuthTokens | AuthChallenge:
+        # TODO(#11): call initiate_auth with USER_PASSWORD_AUTH;
+        #            if response["ChallengeName"] == "NEW_PASSWORD_REQUIRED" return
+        #            AuthChallenge(challenge_name=..., session=response["Session"]);
+        #            otherwise parse AuthenticationResult and return AuthTokens.
+        #            Map NotAuthorizedException / UserNotFoundException → InvalidCredentialsError.
+        raise NotImplementedError
+
+    async def respond_to_new_password_challenge(
+        self, *, email: str, session: str, new_password: str
+    ) -> AuthTokens:
+        # TODO(#11): call respond_to_auth_challenge with ChallengeName=NEW_PASSWORD_REQUIRED,
+        #            ChallengeResponses={"USERNAME": email, "NEW_PASSWORD": new_password},
+        #            Session=session; parse AuthenticationResult and return AuthTokens.
+        #            Map InvalidPasswordException → WeakPasswordError,
+        #            NotAuthorizedException → InvalidCredentialsError.
+        raise NotImplementedError
 
     @staticmethod
     def _extract_error_code(err: ClientError) -> str:

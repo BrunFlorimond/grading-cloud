@@ -8,6 +8,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
@@ -19,7 +20,12 @@ from exam_api.application.list_teacher_exams import (
     ListTeacherExamsCommand,
     ListTeacherExamsUseCase,
 )
-from exam_api.domain.errors import ExamTitleRequiredError, ExamTitleTooLongError
+from exam_api.domain.errors import (
+    ExamCreationConflictError,
+    ExamTitleRequiredError,
+    ExamTitleTooLongError,
+    InvalidExamListCursorError,
+)
 from exam_api.infrastructure.dynamodb_exam_creation_repository import DynamoDbExamCreationRepository
 from exam_api.ports.exam_creation_repository_port import ExamPage
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
@@ -84,7 +90,7 @@ async def test_create_exam_persists_exam_with_repository() -> None:
     assert passed.title == "Midterm"
     assert passed.description == "Chapitre 1"
     assert passed.subject == "Math"
-    assert passed.status == ExamStatus.DRAFT
+    assert passed.status == ExamStatus.CREATED
     assert passed.created_at is not None
 
 
@@ -150,7 +156,7 @@ async def test_list_exams_returns_page_from_repository() -> None:
                 exam_id="e1",
                 teacher_id="t1",
                 title="A",
-                status=ExamStatus.DRAFT,
+                status=ExamStatus.CREATED,
                 created_at="2026-05-01T12:00:00.000000Z",
             )
         ],
@@ -243,6 +249,16 @@ def test_post_exams_title_too_long_returns_422(exam_api_client: TestClient) -> N
     assert response.status_code == 422
 
 
+def test_post_exams_whitespace_only_title_returns_422(exam_api_client: TestClient) -> None:
+    response = exam_api_client.post(
+        "/exams",
+        json={"title": "   "},
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_get_exams_requires_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
@@ -265,7 +281,7 @@ def test_get_exams_returns_paginated_list(exam_api_client: TestClient) -> None:
                     exam_id="e1",
                     teacher_id="teacher-1",
                     title="T",
-                    status=ExamStatus.DRAFT,
+                    status=ExamStatus.CREATED,
                     created_at="2026-05-01T12:00:00.000000Z",
                 )
             ],
@@ -278,9 +294,23 @@ def test_get_exams_returns_paginated_list(exam_api_client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["items"] == [
-        {"exam_id": "e1", "title": "T", "status": "draft"}
+        {"exam_id": "e1", "title": "T", "status": "CREATED"}
     ]
     assert body["next_cursor"] is None
+
+
+def test_get_exams_invalid_cursor_returns_422(exam_api_client: TestClient) -> None:
+    repo = exam_api_client.app.state.exam_creation_repository
+    repo.list_teacher_exams = AsyncMock(
+        side_effect=InvalidExamListCursorError("Invalid pagination cursor.")
+    )
+
+    response = exam_api_client.get(
+        "/exams?cursor=garbage",
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 422
 
 
 # --- DynamoDbExamCreationRepository ---
@@ -298,7 +328,7 @@ async def test_create_exam_writes_metadata_item() -> None:
         exam_id="550e8400-e29b-41d4-a716-446655440000",
         teacher_id="teacher-1",
         title="Midterm",
-        status=ExamStatus.DRAFT,
+        status=ExamStatus.CREATED,
         created_at="2026-05-01T12:00:00.000000Z",
     )
 
@@ -323,7 +353,7 @@ async def test_create_exam_writes_teacher_ownership_edge() -> None:
         exam_id="550e8400-e29b-41d4-a716-446655440000",
         teacher_id="teacher-1",
         title="Midterm",
-        status=ExamStatus.DRAFT,
+        status=ExamStatus.CREATED,
         created_at="2026-05-01T12:00:00.000000Z",
     )
 
@@ -376,8 +406,6 @@ async def test_list_teacher_exams_cursor_pagination() -> None:
         "PK": {"S": "TEACHER#t1"},
         "SK": {"S": "TS#2026-05-01T12:00:00.000000Z#e1"},
     }
-    raw = json.dumps(lek, sort_keys=True).encode("utf-8")
-    cursor = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
     client = AsyncMock()
     client.query = AsyncMock(
@@ -398,3 +426,63 @@ async def test_list_teacher_exams_cursor_pagination() -> None:
 
     second_call = client.query.await_args_list[1].kwargs
     assert second_call["ExclusiveStartKey"] == lek
+
+
+@pytest.mark.asyncio
+async def test_create_exam_transaction_conditional_failure_raises_conflict() -> None:
+    client = AsyncMock()
+    client.transact_write_items = AsyncMock(
+        side_effect=ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException", "Message": "tx"},
+                "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
+            },
+            "TransactWriteItems",
+        )
+    )
+    repo = DynamoDbExamCreationRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+    exam = Exam(
+        exam_id="550e8400-e29b-41d4-a716-446655440000",
+        teacher_id="teacher-1",
+        title="Midterm",
+        status=ExamStatus.CREATED,
+        created_at="2026-05-01T12:00:00.000000Z",
+    )
+
+    with pytest.raises(ExamCreationConflictError):
+        await repo.create_exam(exam)
+
+
+@pytest.mark.asyncio
+async def test_list_teacher_exams_query_error_maps_to_invalid_cursor() -> None:
+    client = AsyncMock()
+    client.query = AsyncMock(
+        side_effect=ClientError(
+            {"Error": {"Code": "ValidationException", "Message": "bad key"}},
+            "Query",
+        )
+    )
+    repo = DynamoDbExamCreationRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+
+    with pytest.raises(InvalidExamListCursorError):
+        await repo.list_teacher_exams(teacher_id="t1", limit=5, cursor=None)
+
+
+@pytest.mark.asyncio
+async def test_list_teacher_exams_invalid_cursor_shape_raises() -> None:
+    repo = DynamoDbExamCreationRepository(
+        table_name="grading-table",
+        dynamodb_client=AsyncMock(),
+    )
+    raw = base64.urlsafe_b64encode(json.dumps({"PK": "not-a-map"}).encode()).decode(
+        "ascii"
+    ).rstrip("=")
+
+    with pytest.raises(InvalidExamListCursorError):
+        await repo.list_teacher_exams(teacher_id="t1", limit=5, cursor=raw)

@@ -8,6 +8,9 @@ from .models import StrictModel
 
 
 class ExamStatus(StrEnum):
+    """Initial exam row uses CREATED; legacy rows may still be ``draft``."""
+
+    CREATED = "created"
     DRAFT = "draft"
     READY = "ready"
     INGESTION_RUNNING = "ingestion_running"
@@ -19,6 +22,7 @@ class ExamStatus(StrEnum):
 
 
 _ALLOWED_TRANSITIONS: dict[ExamStatus, set[ExamStatus]] = {
+    ExamStatus.CREATED: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.DRAFT: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.READY: {ExamStatus.INGESTION_RUNNING, ExamStatus.FAILED},
     ExamStatus.INGESTION_RUNNING: {ExamStatus.CORRECTION_RUNNING, ExamStatus.FAILED},

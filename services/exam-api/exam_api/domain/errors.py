@@ -50,3 +50,11 @@ class ExamTitleRequiredError(ExamValidationError):
 
 class ExamTitleTooLongError(ExamValidationError):
     """Raised when the exam title exceeds the maximum allowed length (120 chars)."""
+
+
+class ExamCreationConflictError(ExamValidationError):
+    """Raised when persisting a new exam hits a conditional write conflict (e.g. duplicate PK)."""
+
+
+class InvalidExamListCursorError(ExamValidationError):
+    """Raised when the pagination cursor cannot be applied to DynamoDB."""

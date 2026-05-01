@@ -14,7 +14,8 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryPort, ExamPage
+from exam_api.domain.errors import ExamCreationConflictError, InvalidExamListCursorError
+from exam_api.ports.exam_creation_repository_port import ExamPage
 
 T = TypeVar("T")
 
@@ -90,6 +91,12 @@ def _decode_lek(cursor: str) -> dict[str, Any]:
     return decoded
 
 
+def _is_valid_exclusive_start_key(key: dict[str, Any]) -> bool:
+    pk = key.get("PK")
+    sk = key.get("SK")
+    return isinstance(pk, dict) and isinstance(sk, dict) and "S" in pk and "S" in sk
+
+
 class DynamoDbExamCreationRepository:
     """Implements ExamCreationRepositoryPort against the single grading DynamoDB table.
 
@@ -130,9 +137,6 @@ class DynamoDbExamCreationRepository:
             return await fn(client)
 
     async def create_exam(self, exam: Exam) -> None:
-        if exam.created_at is None:
-            raise ValueError("Exam.created_at must be set before persisting.")
-
         metadata_raw = {
             "PK": f"EXAM#{exam.exam_id}",
             "SK": "METADATA",
@@ -193,7 +197,16 @@ class DynamoDbExamCreationRepository:
             except ClientError as err:
                 code = str(err.response.get("Error", {}).get("Code", ""))
                 if code == "TransactionCanceledException":
-                    raise RuntimeError("Exam could not be created (transaction cancelled).") from err
+                    reasons = err.response.get("CancellationReasons", [])
+                    if isinstance(reasons, list):
+                        for reason in reasons:
+                            if isinstance(reason, dict) and reason.get("Code") == "ConditionalCheckFailed":
+                                raise ExamCreationConflictError(
+                                    "Exam metadata already exists for this identifier."
+                                ) from err
+                    raise ExamCreationConflictError(
+                        "Exam could not be created (transaction cancelled)."
+                    ) from err
                 raise
 
         await self._use_client(_tx)
@@ -247,9 +260,12 @@ class DynamoDbExamCreationRepository:
         exclusive_start_key: dict[str, Any] | None = None
         if cursor is not None:
             try:
-                exclusive_start_key = _decode_lek(cursor)
-            except ValueError:
-                return ExamPage(items=[], next_cursor=None)
+                decoded = _decode_lek(cursor)
+            except ValueError as err:
+                raise InvalidExamListCursorError("Invalid pagination cursor.") from err
+            if not _is_valid_exclusive_start_key(decoded):
+                raise InvalidExamListCursorError("Invalid pagination cursor.")
+            exclusive_start_key = decoded
 
         async def _query(client: Any) -> ExamPage:
             kwargs: dict[str, Any] = {
@@ -265,7 +281,10 @@ class DynamoDbExamCreationRepository:
             if exclusive_start_key is not None:
                 kwargs["ExclusiveStartKey"] = exclusive_start_key
 
-            response = await client.query(**kwargs)
+            try:
+                response = await client.query(**kwargs)
+            except ClientError as err:
+                raise InvalidExamListCursorError("Invalid pagination cursor.") from err
             items_out: list[Exam] = []
             for item in response.get("Items", []):
                 if not isinstance(item, dict):

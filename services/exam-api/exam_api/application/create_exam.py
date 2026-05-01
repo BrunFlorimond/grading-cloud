@@ -45,7 +45,7 @@ class CreateExamUseCase:
             exam_id=exam_id,
             teacher_id=command.teacher_id,
             title=stripped,
-            status=ExamStatus.DRAFT,
+            status=ExamStatus.CREATED,
             description=command.description,
             subject=command.subject,
             created_at=created_at,

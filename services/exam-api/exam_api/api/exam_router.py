@@ -5,15 +5,26 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from grading_shared.domain.exam import ExamStatus
 from pydantic import BaseModel, ConfigDict, Field
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
 from exam_api.application.create_exam import CreateExamCommand, CreateExamUseCase
 from exam_api.application.list_teacher_exams import ListTeacherExamsCommand, ListTeacherExamsUseCase
-from exam_api.domain.errors import ExamTitleRequiredError, ExamTitleTooLongError
+from exam_api.domain.errors import (
+    ExamCreationConflictError,
+    ExamTitleRequiredError,
+    InvalidExamListCursorError,
+)
 from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryPort
 
 router = APIRouter(prefix="/exams", tags=["exams"])
+
+
+def _api_exam_status(status: ExamStatus) -> str:
+    if status == ExamStatus.CREATED:
+        return "CREATED"
+    return status.value
 
 
 class CreateExamRequest(BaseModel):
@@ -87,9 +98,9 @@ async def create_exam(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(err),
         ) from err
-    except ExamTitleTooLongError as err:
+    except ExamCreationConflictError as err:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(err),
         ) from err
     return CreateExamResponse(exam_id=result.exam_id, status=result.status)
@@ -102,16 +113,26 @@ async def list_exams(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> ListExamsResponse:
-    page = await use_case.execute(
-        ListTeacherExamsCommand(
-            teacher_id=current_teacher.teacher_id,
-            limit=limit,
-            cursor=cursor,
+    try:
+        page = await use_case.execute(
+            ListTeacherExamsCommand(
+                teacher_id=current_teacher.teacher_id,
+                limit=limit,
+                cursor=cursor,
+            )
         )
-    )
+    except InvalidExamListCursorError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        ) from err
     return ListExamsResponse(
         items=[
-            ExamSummary(exam_id=exam.exam_id, title=exam.title, status=exam.status.value)
+            ExamSummary(
+                exam_id=exam.exam_id,
+                title=exam.title,
+                status=_api_exam_status(exam.status),
+            )
             for exam in page.items
         ],
         next_cursor=page.next_cursor,

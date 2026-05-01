@@ -58,7 +58,14 @@ def test_upsert_student_scope_writes_student_item() -> None:
         external_student_id="roster-17",
     )
 
-    call_kwargs = table.update_item.call_args.kwargs
+    first_call_kwargs = table.update_item.call_args_list[0].kwargs
+    second_call_kwargs = table.update_item.call_args_list[1].kwargs
+    assert table.update_item.call_count == 2
+    assert second_call_kwargs["Key"]["PK"] == "STUDENT#student-sub-1"
+    assert second_call_kwargs["Key"]["SK"] == "SCOPE"
+    assert second_call_kwargs["ExpressionAttributeValues"][":exam_id"] == "exam-1"
+
+    call_kwargs = first_call_kwargs
     assert call_kwargs["Key"]["PK"] == "EXAM#exam-1"
     assert call_kwargs["Key"]["SK"] == "STUDENT#student-sub-1"
     assert "if_not_exists(invited_at, :invited_at)" in call_kwargs["UpdateExpression"]
@@ -89,6 +96,27 @@ def test_get_student_scope_returns_student_record() -> None:
     assert student.student_id == "student-sub-1"
     assert student.exam_id == "exam-1"
     assert str(student.email) == "student@example.com"
+
+
+def test_get_exam_id_for_student_sub_returns_exam_id() -> None:
+    table = Mock()
+    table.get_item.return_value = {
+        "Item": {
+            "PK": "STUDENT#student-sub-1",
+            "SK": "SCOPE",
+            "exam_id": "exam-1",
+        }
+    }
+    dynamodb = Mock()
+    dynamodb.Table.return_value = table
+    repository = DynamoDbInviteRepository(
+        table_name="grading-table",
+        dynamodb_resource=dynamodb,
+    )
+
+    exam_id = repository.get_exam_id_for_student_sub(student_sub="student-sub-1")
+
+    assert exam_id == "exam-1"
 
 
 def test_save_notation_payload_persists_payload_under_student_key() -> None:

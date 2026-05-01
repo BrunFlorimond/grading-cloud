@@ -7,7 +7,11 @@ from grading_shared.ports import ExamRepositoryPort
 from grading_shared.domain.models import StrictModel
 from pydantic import EmailStr
 
-from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+from exam_api.domain.errors import (
+    ExamNotFoundError,
+    ExamOwnershipError,
+    StudentExamScopeConflictError,
+)
 from exam_api.domain.student import Student
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
@@ -50,6 +54,13 @@ class InviteStudentUseCase:
             exam_id=exam.exam_id,
             email=command.student_email,
         )
+        existing_exam_id = self._student_scope_repository.get_exam_id_for_student_sub(
+            student_sub=student.student_id
+        )
+        if existing_exam_id is not None and existing_exam_id != exam.exam_id:
+            raise StudentExamScopeConflictError(
+                "Student account is already scoped to another exam."
+            )
         self._student_scope_repository.upsert_student_scope(
             student=student,
             teacher_id=command.teacher_id,

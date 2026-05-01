@@ -52,7 +52,6 @@ class CurrentStudent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     student_id: str
-    exam_id: str
 
 
 class StudentScopeResponse(BaseModel):
@@ -130,18 +129,12 @@ def get_current_student(
             detail="Only students can access this route.",
         )
     student_id = claims.get("sub")
-    exam_id = claims.get("custom:exam_id")
     if not isinstance(student_id, str) or not student_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing student identifier in JWT claims.",
         )
-    if not isinstance(exam_id, str) or not exam_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing exam scope in JWT claims.",
-        )
-    return CurrentStudent(student_id=student_id, exam_id=exam_id)
+    return CurrentStudent(student_id=student_id)
 
 
 def get_student_invite_service(request: Request) -> StudentInviteServicePort:
@@ -252,7 +245,7 @@ async def get_student_scope(
         StudentScopeRepositoryPort, Depends(get_student_scope_repository)
     ],
 ) -> StudentScopeResponse:
-    if current_student.exam_id != exam_id or current_student.student_id != student_id:
+    if current_student.student_id != student_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Student token does not match requested resource.",

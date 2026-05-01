@@ -50,6 +50,7 @@ def client() -> TestClient:
     invite_repository.save_notation_payload = Mock()
     invite_repository.upsert_student_scope = Mock()
     invite_repository.get_student_scope = Mock()
+    invite_repository.get_exam_id_for_student_sub = Mock()
     app.state.invite_repository = invite_repository
     app.state.jwt_verifier = Mock(spec=["decode_and_verify_token"])
     test_client = TestClient(app)
@@ -65,10 +66,14 @@ def _build_use_case(
     exam_repository: Mock | None = None,
     student_scope_repository: Mock | None = None,
 ) -> InviteStudentUseCase:
+    scope_repository = student_scope_repository
+    if scope_repository is None:
+        scope_repository = Mock()
+        scope_repository.get_exam_id_for_student_sub.return_value = None
     return InviteStudentUseCase(
         invite_service=invite_service or Mock(),
         exam_repository=exam_repository or Mock(),
-        student_scope_repository=student_scope_repository or Mock(),
+        student_scope_repository=scope_repository,
     )
 
 
@@ -82,6 +87,7 @@ def test_use_case_returns_new_invite_result() -> None:
         status=ExamStatus.DRAFT,
     )
     student_scope_repository = Mock()
+    student_scope_repository.get_exam_id_for_student_sub.return_value = None
     invite_service.invite_student.return_value = PortInviteStudentResult(
         cognito_sub="student-sub-123",
         already_existed=False,
@@ -113,6 +119,9 @@ def test_use_case_returns_new_invite_result() -> None:
         student_email="student@example.com",
         exam_id="exam-1",
     )
+    student_scope_repository.get_exam_id_for_student_sub.assert_called_once_with(
+        student_sub="student-sub-123"
+    )
     student_scope_repository.upsert_student_scope.assert_called_once()
 
 
@@ -142,6 +151,40 @@ def test_use_case_returns_reinvited_true_when_student_exists() -> None:
 
     assert result.re_invited is True
     assert result.student.student_id == "student-sub-existing"
+
+
+def test_use_case_raises_scope_conflict_when_student_belongs_to_other_exam() -> None:
+    invite_service = Mock()
+    exam_repository = Mock()
+    student_scope_repository = Mock()
+    exam_repository.get_exam.return_value = Exam(
+        exam_id="exam-1",
+        teacher_id="teacher-1",
+        title="Math Midterm",
+        status=ExamStatus.DRAFT,
+    )
+    invite_service.invite_student.return_value = PortInviteStudentResult(
+        cognito_sub="student-sub-existing",
+        already_existed=True,
+    )
+    student_scope_repository.get_exam_id_for_student_sub.return_value = "exam-legacy"
+    use_case = _build_use_case(
+        invite_service=invite_service,
+        exam_repository=exam_repository,
+        student_scope_repository=student_scope_repository,
+    )
+
+    with pytest.raises(StudentExamScopeConflictError):
+        use_case.execute(
+            InviteStudentCommand(
+                exam_id="exam-1",
+                student_id="student-external-id",
+                student_email="student@example.com",
+                teacher_id="teacher-1",
+            )
+        )
+
+    student_scope_repository.upsert_student_scope.assert_not_called()
 
 
 def test_use_case_raises_exam_not_found() -> None:
@@ -207,7 +250,6 @@ def test_adapter_creates_cognito_user_and_sends_email() -> None:
     create_call = cognito.admin_create_user.call_args.kwargs
     assert create_call["MessageAction"] == "SUPPRESS"
     assert {"Name": "custom:role", "Value": "student"} in create_call["UserAttributes"]
-    assert {"Name": "custom:exam_id", "Value": "exam-1"} in create_call["UserAttributes"]
     cognito.admin_add_user_to_group.assert_called_once_with(
         UserPoolId="pool-id",
         Username="student@example.com",
@@ -226,7 +268,6 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito.admin_get_user.return_value = {
         "UserAttributes": [
             {"Name": "sub", "Value": "existing-sub"},
-            {"Name": "custom:exam_id", "Value": "exam-1"},
         ]
     }
     adapter = CognitoSesStudentInviteAdapter(
@@ -243,33 +284,6 @@ def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito.admin_set_user_password.assert_called_once()
     cognito.admin_add_user_to_group.assert_called_once()
     ses.send_email.assert_called_once()
-
-
-def test_adapter_raises_conflict_when_existing_user_bound_to_other_exam() -> None:
-    cognito = Mock()
-    ses = Mock()
-    cognito.admin_create_user.side_effect = _make_client_error(
-        "UsernameExistsException",
-        "Already exists",
-    )
-    cognito.admin_get_user.return_value = {
-        "UserAttributes": [
-            {"Name": "sub", "Value": "existing-sub"},
-            {"Name": "custom:exam_id", "Value": "exam-legacy"},
-        ]
-    }
-    adapter = CognitoSesStudentInviteAdapter(
-        user_pool_id="pool-id",
-        ses_from_address="noreply@example.com",
-        cognito_client=cognito,
-        ses_client=ses,
-    )
-
-    with pytest.raises(StudentExamScopeConflictError):
-        adapter.invite_student(student_email="student@example.com", exam_id="exam-1")
-
-    cognito.admin_set_user_password.assert_not_called()
-    ses.send_email.assert_not_called()
 
 
 def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
@@ -418,7 +432,6 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-123",
         "custom:role": "student",
-        "custom:exam_id": "exam-1",
         "token_use": "id",
     }
     client.app.state.invite_repository.get_student_scope.return_value = Student(
@@ -444,7 +457,6 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-abc",
         "custom:role": "student",
-        "custom:exam_id": "exam-1",
         "token_use": "id",
     }
 
@@ -456,20 +468,26 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     assert response.status_code == 403
 
 
-def test_student_scope_endpoint_returns_403_on_exam_mismatch(client: TestClient) -> None:
+def test_student_scope_endpoint_ignores_custom_exam_id_claim(client: TestClient) -> None:
     client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-123",
         "custom:role": "student",
         "custom:exam_id": "exam-from-token",
         "token_use": "id",
     }
+    client.app.state.invite_repository.get_student_scope.return_value = Student(
+        student_id="student-sub-123",
+        exam_id="exam-from-path",
+        email="student@example.com",
+    )
 
     response = client.get(
         "/exams/exam-from-path/students/student-sub-123/scope",
         headers={"Authorization": "Bearer valid.token.value"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["exam_id"] == "exam-from-path"
 
 
 def test_student_scope_endpoint_returns_404_when_scope_is_missing(
@@ -478,7 +496,6 @@ def test_student_scope_endpoint_returns_404_when_scope_is_missing(
     client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
         "sub": "student-sub-123",
         "custom:role": "student",
-        "custom:exam_id": "exam-1",
         "token_use": "id",
     }
     client.app.state.invite_repository.get_student_scope.return_value = None

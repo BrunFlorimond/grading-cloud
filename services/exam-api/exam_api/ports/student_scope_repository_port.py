@@ -16,3 +16,6 @@ class StudentScopeRepositoryPort(Protocol):
 
     def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
         """Load a student scope record by exam and Cognito subject."""
+
+    def get_exam_id_for_student_sub(self, *, student_sub: str) -> str | None:
+        """Load the exam scope currently bound to a Cognito student subject."""

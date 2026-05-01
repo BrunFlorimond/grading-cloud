@@ -99,6 +99,28 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
                 ":invited_at": now_iso,
             },
         )
+        self._table.update_item(
+            Key={
+                "PK": f"STUDENT#{student.student_id}",
+                "SK": "SCOPE",
+            },
+            UpdateExpression=(
+                "SET exam_id = :exam_id, "
+                "teacher_id = :teacher_id, "
+                "external_student_id = :external_student_id, "
+                "email = :email, "
+                "updated_at = :updated_at, "
+                "invited_at = if_not_exists(invited_at, :invited_at)"
+            ),
+            ExpressionAttributeValues={
+                ":exam_id": student.exam_id,
+                ":teacher_id": teacher_id,
+                ":external_student_id": external_student_id,
+                ":email": str(student.email),
+                ":updated_at": now_iso,
+                ":invited_at": now_iso,
+            },
+        )
 
     def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
         response = self._table.get_item(
@@ -115,3 +137,19 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
         if not isinstance(email, str) or not email:
             return None
         return Student(student_id=student_sub, exam_id=exam_id, email=email)
+
+    def get_exam_id_for_student_sub(self, *, student_sub: str) -> str | None:
+        response = self._table.get_item(
+            Key={
+                "PK": f"STUDENT#{student_sub}",
+                "SK": "SCOPE",
+            },
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not isinstance(item, dict):
+            return None
+        exam_id = item.get("exam_id")
+        if not isinstance(exam_id, str) or not exam_id:
+            return None
+        return exam_id

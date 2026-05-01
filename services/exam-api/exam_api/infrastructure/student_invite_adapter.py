@@ -7,6 +7,9 @@ import secrets
 import string
 from typing import Any
 
+# TODO(#59): replace boto3 with aiobotocore once migration is complete.
+# WARNING: boto3 and aiobotocore clients cannot share the same event loop.
+# Replace ALL boto3 clients in this adapter atomically (cognito + ses).
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
@@ -14,7 +17,11 @@ from exam_api.ports.student_invite_port import InviteStudentResult, StudentInvit
 
 
 class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
-    """Implements StudentInviteServicePort using Cognito AdminCreateUser + SES SendEmail."""
+    """Implements StudentInviteServicePort using Cognito AdminCreateUser + SES SendEmail.
+
+    TODO(#59): migrate _invite_student_sync and _send_invitation_email to native async
+    using aiobotocore, then remove asyncio.to_thread wrapping in invite_student.
+    """
 
     def __init__(
         self,
@@ -26,6 +33,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
     ) -> None:
         self._user_pool_id = user_pool_id
         self._ses_from_address = ses_from_address
+        # TODO(#59): replace with aiobotocore async clients
         self._cognito = cognito_client or boto3.client("cognito-idp")
         self._ses = ses_client or boto3.client("ses")
 
@@ -35,6 +43,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         student_email: str,
         exam_id: str,
     ) -> InviteStudentResult:
+        # TODO(#59): remove asyncio.to_thread — call aiobotocore methods directly with await
         return await asyncio.to_thread(
             self._invite_student_sync,
             student_email,

@@ -6,6 +6,9 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
+# TODO(#59): replace boto3 with aiobotocore once migration is complete.
+# Remove asyncio.to_thread wrappers (upsert_student_scope, get_student_scope, get_exam)
+# and use native await on aiobotocore async client calls.
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 

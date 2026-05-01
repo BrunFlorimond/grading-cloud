@@ -5,19 +5,30 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+# TODO(#59): replace httpx.get (blocking) with httpx.AsyncClient in _refresh_jwks
 import httpx
 from jose import JWTError, jwt
 
 
 class CognitoJwtVerifier:
+    """Verifies Cognito JWT tokens.
+
+    TODO(#59): migrate to fully async:
+    - Replace threading.Lock with asyncio.Lock
+    - Replace httpx.get with await httpx.AsyncClient().get in _refresh_jwks
+    - Update FastAPI dependencies (get_current_teacher, get_current_student) to async def
+    """
+
     def __init__(self, *, issuer: str, audience: str) -> None:
         self._issuer = issuer.rstrip("/")
         self._audience = audience
         self._jwks_url = f"{self._issuer}/.well-known/jwks.json"
         self._keys_by_kid: dict[str, dict[str, str]] = {}
+        # TODO(#59): replace threading.Lock with asyncio.Lock once method is async
         self._refresh_lock = threading.Lock()
 
-    def decode_and_verify_token(self, token: str) -> dict[str, Any]:
+    # TODO(#59): convert to async def — update all FastAPI dependencies that call this method
+    async def decode_and_verify_token(self, token: str) -> dict[str, Any]:
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         if not isinstance(kid, str) or not kid:
@@ -25,6 +36,7 @@ class CognitoJwtVerifier:
 
         key = self._keys_by_kid.get(kid)
         if key is None:
+            # TODO(#59): replace with asyncio.Lock and await self._refresh_jwks()
             with self._refresh_lock:
                 key = self._keys_by_kid.get(kid)
                 if key is None:
@@ -45,7 +57,11 @@ class CognitoJwtVerifier:
             raise JWTError("Expected Cognito ID token.")
         return claims
 
+    # TODO(#59): convert to async def _refresh_jwks using httpx.AsyncClient
     def _refresh_jwks(self) -> None:
+        # TODO(#59): replace with:
+        #   async with httpx.AsyncClient() as client:
+        #       response = await client.get(self._jwks_url, timeout=5.0)
         response = httpx.get(self._jwks_url, timeout=5.0)
         response.raise_for_status()
         payload = response.json()

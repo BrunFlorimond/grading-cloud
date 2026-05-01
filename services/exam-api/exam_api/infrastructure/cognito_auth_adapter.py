@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# TODO(#59): replace boto3 with aiobotocore once migration is complete.
+# WARNING: boto3 and aiobotocore clients cannot share the same event loop.
+# Replace ALL boto3 clients in this adapter atomically.
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
@@ -16,7 +19,14 @@ from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
 
 
 class CognitoAuthAdapter(AuthServicePort):
-    """Implements AuthServicePort using AWS Cognito via boto3."""
+    """Implements AuthServicePort using AWS Cognito via boto3.
+
+    TODO(#59): migrate all methods to aiobotocore to remove asyncio.to_thread wrapping.
+    Replace boto3.client("cognito-idp") with:
+        session = aiobotocore.session.get_session()
+        async with session.create_client("cognito-idp") as client:
+            ...
+    """
 
     def __init__(
         self,
@@ -27,9 +37,12 @@ class CognitoAuthAdapter(AuthServicePort):
     ) -> None:
         self._user_pool_id = user_pool_id
         self._client_id = client_id
+        # TODO(#59): replace with aiobotocore async client (injected or created in __aenter__)
         self._client = client or boto3.client("cognito-idp")
 
-    def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+    # TODO(#59): convert to native async def using aiobotocore — remove run_in_threadpool in auth_router
+    async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+        # TODO(#59): replace all self._client.* calls with await self._client.*
         try:
             sign_up_response = self._client.sign_up(
                 ClientId=self._client_id,
@@ -65,7 +78,9 @@ class CognitoAuthAdapter(AuthServicePort):
         )
         return str(sign_up_response["UserSub"])
 
-    def login_teacher(self, *, email: str, password: str) -> AuthTokens:
+    # TODO(#59): convert to native async def using aiobotocore — remove run_in_threadpool in auth_router
+    async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
+        # TODO(#59): replace all self._client.* calls with await self._client.*
         try:
             response = self._client.initiate_auth(
                 ClientId=self._client_id,

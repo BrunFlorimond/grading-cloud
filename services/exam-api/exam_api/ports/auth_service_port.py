@@ -17,10 +17,12 @@ class AuthTokens(StrictModel):
 
 @runtime_checkable
 class AuthServicePort(Protocol):
-    def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+    # TODO(#59): implement with aiobotocore in CognitoAuthAdapter
+    async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
         """Create a Cognito user in the teachers group and return teacher_id (sub)."""
         ...
 
-    def login_teacher(self, *, email: str, password: str) -> AuthTokens:
+    # TODO(#59): implement with aiobotocore in CognitoAuthAdapter
+    async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
         """Authenticate via USER_PASSWORD_AUTH and return JWT tokens."""
         ...

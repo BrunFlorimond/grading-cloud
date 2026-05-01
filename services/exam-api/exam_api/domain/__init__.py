@@ -1,9 +1,21 @@
 from .teacher import Teacher
-from .errors import DuplicateEmailError, InvalidCredentialsError, WeakPasswordError
+from .student import Student
+from .errors import (
+    DuplicateEmailError,
+    ExamNotFoundError,
+    ExamOwnershipError,
+    InvalidCredentialsError,
+    StudentAlreadyInvitedError,
+    WeakPasswordError,
+)
 
 __all__ = [
     "Teacher",
+    "Student",
     "DuplicateEmailError",
-    "WeakPasswordError",
+    "ExamNotFoundError",
+    "ExamOwnershipError",
     "InvalidCredentialsError",
+    "StudentAlreadyInvitedError",
+    "WeakPasswordError",
 ]

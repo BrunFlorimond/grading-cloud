@@ -34,3 +34,7 @@ class ExamOwnershipError(InviteError):
 
 class StudentAlreadyInvitedError(InviteError):
     """Raised when the student has already been invited; re-invite re-sends the email."""
+
+
+class StudentExamScopeConflictError(InviteError):
+    """Raised when an existing student account is bound to another exam scope."""

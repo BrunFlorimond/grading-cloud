@@ -9,6 +9,7 @@ from typing import Any
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
+from exam_api.domain.errors import StudentExamScopeConflictError
 from exam_api.ports.student_invite_port import InviteStudentResult, StudentInviteServicePort
 
 
@@ -54,12 +55,23 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             if self._extract_error_code(err) != "UsernameExistsException":
                 raise
             already_existed = True
+            existing_user = self._cognito.admin_get_user(
+                UserPoolId=self._user_pool_id,
+                Username=student_email,
+            )
+            existing_exam_id = self._extract_user_attribute(
+                existing_user,
+                "custom:exam_id",
+            )
+            if existing_exam_id and existing_exam_id != exam_id:
+                raise StudentExamScopeConflictError(
+                    "Student account is already scoped to another exam."
+                )
             self._cognito.admin_update_user_attributes(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
                 UserAttributes=[
                     {"Name": "custom:role", "Value": "student"},
-                    {"Name": "custom:exam_id", "Value": exam_id},
                 ],
             )
             self._cognito.admin_set_user_password(
@@ -68,7 +80,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 Password=temporary_password,
                 Permanent=False,
             )
-            cognito_sub = self._fetch_user_sub(student_email)
+            cognito_sub = self._extract_user_sub(existing_user, student_email)
 
         self._cognito.admin_add_user_to_group(
             UserPoolId=self._user_pool_id,
@@ -118,12 +130,20 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             },
         )
 
-    def _fetch_user_sub(self, student_email: str) -> str:
-        response = self._cognito.admin_get_user(
-            UserPoolId=self._user_pool_id,
-            Username=student_email,
-        )
-        return self._extract_user_sub(response, student_email)
+    @staticmethod
+    def _extract_user_attribute(user_payload: dict[str, Any], name: str) -> str | None:
+        attributes = user_payload.get("UserAttributes") or user_payload.get("Attributes", [])
+        if not isinstance(attributes, list):
+            return None
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            if attribute.get("Name") != name:
+                continue
+            value = attribute.get("Value")
+            if isinstance(value, str) and value:
+                return value
+        return None
 
     @staticmethod
     def _extract_user_sub(user_payload: dict[str, Any], student_email: str) -> str:

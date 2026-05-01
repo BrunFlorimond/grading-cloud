@@ -178,9 +178,8 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
 
     @staticmethod
     def _is_scope_conflict_error(err: ClientError) -> bool:
+        # transact_write_items: conditional failures use TransactionCanceledException + CancellationReasons.
         code = str(err.response.get("Error", {}).get("Code", ""))
-        if code == "ConditionalCheckFailedException":
-            return True
         if code != "TransactionCanceledException":
             return False
         reasons = err.response.get("CancellationReasons", [])

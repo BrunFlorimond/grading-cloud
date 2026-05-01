@@ -21,6 +21,55 @@ jobs:
           BODY: ${{ github.event.issue.body }}
         run: printf '%s' "$BODY" > /tmp/issue_body.txt
 
+      - name: Extract acceptance criteria from issue body
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+
+          body = os.environ.get("BODY", "")
+          lines = body.splitlines()
+          section_patterns = (
+              r"acceptance criteria",
+              r"crit[eè]res?\s+d[’']acceptation",
+              r"crit[eè]res?\s+de\s+validation",
+          )
+          heading_re = re.compile(
+              r"^\s{0,3}#{1,6}\s*(?P<title>.+?)\s*$",
+              flags=re.IGNORECASE,
+          )
+
+          extracted = []
+          in_section = False
+          for line in lines:
+              heading_match = heading_re.match(line)
+              if heading_match:
+                  title = heading_match.group("title").strip().lower()
+                  normalized = re.sub(r"\s+", " ", title)
+                  if any(re.fullmatch(pattern, normalized) for pattern in section_patterns):
+                      in_section = True
+                      continue
+                  if in_section:
+                      break
+              if in_section:
+                  extracted.append(line)
+
+          extracted_text = "\n".join(extracted).strip()
+          if not extracted_text:
+              checkboxes = [
+                  line for line in lines if re.match(r"^\s*[-*]\s+\[[ xX]\]\s+", line)
+              ]
+              extracted_text = "\n".join(checkboxes).strip()
+
+          if not extracted_text:
+              extracted_text = "- [ ] Aucun acceptance criteria explicite detecte dans l'issue."
+
+          with open("/tmp/acceptance_criteria.md", "w", encoding="utf-8") as f:
+              f.write(extracted_text + "\n")
+          PY
+
       - uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -44,6 +93,7 @@ jobs:
           prompt: |
             Issue #${{ github.event.issue.number }} : ${{ github.event.issue.title }}
             Lis /tmp/issue_body.txt pour la description complète.
+            Lis /tmp/acceptance_criteria.md pour les acceptance criteria à injecter dans la PR.
 
             Ta mission :
             1. Lis CLAUDE.md pour les conventions du projet
@@ -52,7 +102,9 @@ jobs:
             4. Génère des stubs avec TODOs uniquement — pas d'implémentation complète
                Ordre : domain → ports → application → infrastructure → api
             5. Ajoute un fichier tests/ vide listant les cas à implémenter
-            6. Ouvre une draft PR "Closes #${{ github.event.issue.number }}"
+            6. Ouvre une draft PR "Closes #${{ github.event.issue.number }}" avec une section :
+               "## Acceptance Criteria"
+               contenant exactement le contenu de /tmp/acceptance_criteria.md
             7. Retire le label de l'issue :
                gh issue edit ${{ github.event.issue.number }} --remove-label "ai-scaffold"
 

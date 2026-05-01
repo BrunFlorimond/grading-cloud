@@ -21,6 +21,55 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Extract acceptance criteria from PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+
+          body = os.environ.get("PR_BODY", "")
+          lines = body.splitlines()
+          section_patterns = (
+              r"acceptance criteria",
+              r"crit[eè]res?\s+d[’']acceptation",
+              r"crit[eè]res?\s+de\s+validation",
+          )
+          heading_re = re.compile(
+              r"^\s{0,3}#{1,6}\s*(?P<title>.+?)\s*$",
+              flags=re.IGNORECASE,
+          )
+
+          extracted = []
+          in_section = False
+          for line in lines:
+              heading_match = heading_re.match(line)
+              if heading_match:
+                  title = heading_match.group("title").strip().lower()
+                  normalized = re.sub(r"\s+", " ", title)
+                  if any(re.fullmatch(pattern, normalized) for pattern in section_patterns):
+                      in_section = True
+                      continue
+                  if in_section:
+                      break
+              if in_section:
+                  extracted.append(line)
+
+          extracted_text = "\n".join(extracted).strip()
+          if not extracted_text:
+              checkboxes = [
+                  line for line in lines if re.match(r"^\s*[-*]\s+\[[ xX]\]\s+", line)
+              ]
+              extracted_text = "\n".join(checkboxes).strip()
+
+          if not extracted_text:
+              extracted_text = "- [ ] Aucun acceptance criteria detecte dans la description de PR."
+
+          with open("/tmp/pr_acceptance_criteria.md", "w", encoding="utf-8") as f:
+              f.write(extracted_text + "\n")
+          PY
+
       - uses: anthropics/claude-code-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -41,6 +90,7 @@ jobs:
           prompt: |
             Tu es un tech lead senior qui review une PR sur un projet
             Python/FastAPI avec architecture hexagonale sur AWS.
+            Lis /tmp/pr_acceptance_criteria.md : acceptance criteria à valider.
 
             Analyse dans l'ordre de priorité :
             1. Violations architecture hexagonale (import boto3 dans domain/ ?)
@@ -49,6 +99,12 @@ jobs:
             4. Performance DynamoDB : scan full-table, N+1
             5. Tests manquants ou insuffisants
             6. Conformité Pydantic v2 (extra="forbid", strict=True)
+            7. Validation de chaque acceptance criteria (status rempli/non rempli + justification)
 
             Format : [CRITIQUE|MAJEUR|MINEUR] + fichier:ligne + fix en 2 lignes.
             Sois bref. Pas de félicitations.
+            En plus de l'analyse technique, poste un commentaire dédié sur la PR avec :
+            - Titre: "## Acceptance Criteria Validation"
+            - Une ligne par critère : ✅ rempli / ❌ non rempli + explication concise
+            - Si /tmp/pr_acceptance_criteria.md ne contient pas de critères exploitables, indique-le explicitement
+            Utilise : gh pr comment ${{ github.event.pull_request.number }} --body "<ton commentaire formaté>"

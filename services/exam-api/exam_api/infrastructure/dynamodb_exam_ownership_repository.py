@@ -7,14 +7,19 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 import aiobotocore.session
 
+from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+
 T = TypeVar("T")
 
 
 class DynamoDbExamOwnershipRepository:
     """Checks teacher-to-exam ownership via the single-table DynamoDB design.
 
-    PK = TEACHER#{teacher_id}
-    SK = EXAM#{exam_id}
+    Exam existence: PK = EXAM#{exam_id}, SK = METADATA.
+    Ownership edge: PK = TEACHER#{teacher_id}, SK = EXAM#{exam_id}.
+
+    Without ``dynamodb_client``, each call opens a short-lived DynamoDB client
+    (fine for tests; production should inject the lifespan-scoped client).
     """
 
     def __init__(
@@ -48,16 +53,31 @@ class DynamoDbExamOwnershipRepository:
         ) as client:
             return await fn(client)
 
-    async def teacher_owns_exam(self, *, teacher_id: str, exam_id: str) -> bool:
-        pk = f"TEACHER#{teacher_id}"
-        sk = f"EXAM#{exam_id}"
+    async def verify_teacher_owns_exam(self, *, teacher_id: str, exam_id: str) -> None:
 
-        async def _get_item(client: Any) -> bool:
-            response = await client.get_item(
+        async def _verify(client: Any) -> None:
+            exam_response = await client.get_item(
                 TableName=self._table_name,
-                Key={"PK": {"S": pk}, "SK": {"S": sk}},
+                Key={
+                    "PK": {"S": f"EXAM#{exam_id}"},
+                    "SK": {"S": "METADATA"},
+                },
                 ConsistentRead=True,
             )
-            return bool(response.get("Item"))
+            if not exam_response.get("Item"):
+                raise ExamNotFoundError(f"Exam {exam_id} not found.")
 
-        return await self._use_client(_get_item)
+            edge_response = await client.get_item(
+                TableName=self._table_name,
+                Key={
+                    "PK": {"S": f"TEACHER#{teacher_id}"},
+                    "SK": {"S": f"EXAM#{exam_id}"},
+                },
+                ConsistentRead=True,
+            )
+            if not edge_response.get("Item"):
+                raise ExamOwnershipError(
+                    f"Teacher {teacher_id} does not own exam {exam_id}."
+                )
+
+        await self._use_client(_verify)

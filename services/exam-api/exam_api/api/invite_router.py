@@ -110,7 +110,7 @@ async def verify_teacher_exam_ownership(
         Depends(get_verify_exam_ownership_use_case),
     ],
 ) -> None:
-    """Ensures the DynamoDB TEACHER#/EXAM# edge exists for this teacher and exam."""
+    """Ensures exam METADATA exists and the TEACHER#/EXAM# edge matches this teacher."""
     try:
         await use_case.execute(
             VerifyExamOwnershipCommand(
@@ -118,6 +118,11 @@ async def verify_teacher_exam_ownership(
                 exam_id=exam_id,
             )
         )
+    except ExamNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
     except ExamOwnershipError as err:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

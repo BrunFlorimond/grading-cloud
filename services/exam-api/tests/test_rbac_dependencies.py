@@ -23,7 +23,7 @@ from exam_api.application.verify_exam_ownership import (
     VerifyExamOwnershipCommand,
     VerifyExamOwnershipUseCase,
 )
-from exam_api.domain.errors import ExamOwnershipError
+from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
 from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
     DynamoDbExamOwnershipRepository,
 )
@@ -205,45 +205,65 @@ def test_require_own_data_403_mismatch(
 @pytest.mark.asyncio
 async def test_verify_exam_ownership_calls_port() -> None:
     port = Mock(spec=ExamOwnershipPort)
-    port.teacher_owns_exam = AsyncMock(return_value=True)
+    port.verify_teacher_owns_exam = AsyncMock(return_value=None)
     uc = VerifyExamOwnershipUseCase(port)
     await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
-    port.teacher_owns_exam.assert_awaited_once_with(teacher_id="t1", exam_id="e1")
+    port.verify_teacher_owns_exam.assert_awaited_once_with(teacher_id="t1", exam_id="e1")
 
 
 @pytest.mark.asyncio
-async def test_verify_exam_ownership_raises_when_false() -> None:
+async def test_verify_exam_ownership_propagates_ownership_error() -> None:
     port = Mock(spec=ExamOwnershipPort)
-    port.teacher_owns_exam = AsyncMock(return_value=False)
+    port.verify_teacher_owns_exam = AsyncMock(
+        side_effect=ExamOwnershipError("no access"),
+    )
     uc = VerifyExamOwnershipUseCase(port)
     with pytest.raises(ExamOwnershipError):
         await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
 
 
 @pytest.mark.asyncio
-async def test_verify_exam_ownership_passes_when_true() -> None:
+async def test_verify_exam_ownership_propagates_not_found() -> None:
     port = Mock(spec=ExamOwnershipPort)
-    port.teacher_owns_exam = AsyncMock(return_value=True)
+    port.verify_teacher_owns_exam = AsyncMock(side_effect=ExamNotFoundError("missing"))
     uc = VerifyExamOwnershipUseCase(port)
-    await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
+    with pytest.raises(ExamNotFoundError):
+        await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
 
 
 @pytest.mark.asyncio
-async def test_dynamodb_exam_ownership_true_when_item_exists() -> None:
+async def test_dynamodb_verify_success_when_metadata_and_edge_exist() -> None:
     client = Mock()
     client.get_item = AsyncMock(
-        return_value={"Item": {"PK": {"S": "TEACHER#t"}, "SK": {"S": "EXAM#e"}}}
+        side_effect=[
+            {"Item": {"PK": {"S": "EXAM#e"}}},
+            {"Item": {"PK": {"S": "TEACHER#t"}}},
+        ]
     )
     repo = DynamoDbExamOwnershipRepository(table_name="tbl", dynamodb_client=client)
-    assert await repo.teacher_owns_exam(teacher_id="t", exam_id="e") is True
-    client.get_item.assert_awaited_once()
-    call_kw = client.get_item.await_args.kwargs
-    assert call_kw["Key"] == {"PK": {"S": "TEACHER#t"}, "SK": {"S": "EXAM#e"}}
+    await repo.verify_teacher_owns_exam(teacher_id="t", exam_id="e")
+    assert client.get_item.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_dynamodb_exam_ownership_false_when_missing() -> None:
+async def test_dynamodb_verify_raises_not_found_when_no_metadata() -> None:
     client = Mock()
     client.get_item = AsyncMock(return_value={})
     repo = DynamoDbExamOwnershipRepository(table_name="tbl", dynamodb_client=client)
-    assert await repo.teacher_owns_exam(teacher_id="t", exam_id="e") is False
+    with pytest.raises(ExamNotFoundError):
+        await repo.verify_teacher_owns_exam(teacher_id="t", exam_id="e")
+    client.get_item.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dynamodb_verify_raises_ownership_when_no_edge() -> None:
+    client = Mock()
+    client.get_item = AsyncMock(
+        side_effect=[
+            {"Item": {"PK": {"S": "EXAM#e"}}},
+            {},
+        ]
+    )
+    repo = DynamoDbExamOwnershipRepository(table_name="tbl", dynamodb_client=client)
+    with pytest.raises(ExamOwnershipError):
+        await repo.verify_teacher_owns_exam(teacher_id="t", exam_id="e")

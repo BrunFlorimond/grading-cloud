@@ -14,6 +14,7 @@ from jose import JWTError
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import (
+    get_verify_exam_ownership_use_case,
     provide_invite_use_case,
     router,
     verify_teacher_exam_ownership,
@@ -441,6 +442,34 @@ def test_api_returns_404_when_exam_not_found(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "exam not found"
+
+
+def test_api_returns_404_when_exam_not_found_at_ownership_verify(
+    client: TestClient,
+) -> None:
+    mock_verify_uc = Mock()
+    mock_verify_uc.execute = AsyncMock(
+        side_effect=ExamNotFoundError("Exam exam-missing not found.")
+    )
+    client.app.dependency_overrides[get_verify_exam_ownership_use_case] = (
+        lambda: mock_verify_uc
+    )
+    client.app.dependency_overrides.pop(verify_teacher_exam_ownership, None)
+    client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
+        teacher_id="teacher-1"
+    )
+    mock_invite_uc = Mock()
+    mock_invite_uc.execute = AsyncMock()
+    client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_invite_uc
+
+    response = client.post(
+        "/exams/exam-missing/students/student-1/invite",
+        json={"student_email": "student@example.com"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Exam exam-missing not found."
+    mock_invite_uc.execute.assert_not_called()
 
 
 def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> None:

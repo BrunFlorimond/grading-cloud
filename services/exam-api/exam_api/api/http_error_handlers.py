@@ -38,4 +38,15 @@ def register_http_error_handlers(app: FastAPI) -> None:
                 status_code=exc.status_code,
                 content={"error": detail, "code": code},
             )
-        return await http_exception_handler(request, exc)
+        fallback_code = "unauthorized" if exc.status_code == 401 else "forbidden"
+        hdrs: dict[str, str] = {}
+        if exc.status_code == 401:
+            hdrs["WWW-Authenticate"] = "Bearer"
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": "Unexpected authorization error payload.",
+                "code": fallback_code,
+            },
+            headers=hdrs,
+        )

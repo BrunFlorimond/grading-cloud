@@ -31,9 +31,7 @@ async def _lifespan(app: FastAPI):
     if not region:
         raise RuntimeError("Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client.")
     session = aiobotocore.session.get_session()
-    dynamodb_cm: Any = session.create_client("dynamodb", region_name=region)
-    dynamodb_client = await dynamodb_cm.__aenter__()
-    try:
+    async with session.create_client("dynamodb", region_name=region) as dynamodb_client:
         app.state.student_invite_service = _build_student_invite_service()
         app.state.invite_repository = _build_invite_repository()
         app.state.exam_ownership_repository = _build_exam_ownership_repository(
@@ -41,8 +39,6 @@ async def _lifespan(app: FastAPI):
         )
         app.state.jwt_verifier = _build_jwt_verifier()
         yield
-    finally:
-        await dynamodb_cm.__aexit__(None, None, None)
 
 
 def _build_student_invite_service() -> CognitoSesStudentInviteAdapter:

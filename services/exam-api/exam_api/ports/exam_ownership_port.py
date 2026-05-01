@@ -7,5 +7,5 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class ExamOwnershipPort(Protocol):
-    async def teacher_owns_exam(self, *, teacher_id: str, exam_id: str) -> bool:
-        """Return True iff the exam item exists under the teacher's partition key."""
+    async def verify_teacher_owns_exam(self, *, teacher_id: str, exam_id: str) -> None:
+        """Raise ExamNotFoundError if the exam does not exist, ExamOwnershipError if not owned."""

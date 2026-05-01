@@ -129,7 +129,10 @@ async def login(
     except InvalidCredentialsError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(err) or "Invalid email or password.",
+            detail={
+                "error": str(err) or "Invalid email or password.",
+                "code": "invalid_credentials",
+            },
         ) from err
 
     return LoginResponse(
@@ -142,6 +145,7 @@ async def login(
 # ---------------------------------------------------------------------------
 # Student login (may return NEW_PASSWORD_REQUIRED challenge)
 # ---------------------------------------------------------------------------
+
 
 class StudentLoginResponse(BaseModel):
     """Response for POST /auth/student-login (tokens or NEW_PASSWORD_REQUIRED challenge)."""
@@ -206,7 +210,10 @@ async def student_login(
     except InvalidCredentialsError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(err) or "Invalid email or password.",
+            detail={
+                "error": str(err) or "Invalid email or password.",
+                "code": "invalid_credentials",
+            },
         ) from err
 
     if result.challenge is not None:
@@ -232,7 +239,9 @@ async def student_login(
 )
 async def change_password(
     body: ChangePasswordRequest,
-    use_case: Annotated[ChangeStudentPasswordUseCase, Depends(get_change_password_use_case)],
+    use_case: Annotated[
+        ChangeStudentPasswordUseCase, Depends(get_change_password_use_case)
+    ],
 ) -> ChangePasswordResponse:
     try:
         result = await use_case.execute(
@@ -245,7 +254,10 @@ async def change_password(
     except InvalidCredentialsError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(err) or "Invalid email or session.",
+            detail={
+                "error": str(err) or "Invalid email or session.",
+                "code": "invalid_credentials",
+            },
         ) from err
     except WeakPasswordError as err:
         raise HTTPException(

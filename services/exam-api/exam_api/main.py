@@ -4,22 +4,41 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
+import aiobotocore.session
 from fastapi import FastAPI
 
 from exam_api.api.auth_router import router as auth_router
+from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import router as invite_router
 from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
+from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
+    DynamoDbExamOwnershipRepository,
+)
 from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRepository
-from exam_api.infrastructure.student_invite_adapter import CognitoSesStudentInviteAdapter
+from exam_api.infrastructure.student_invite_adapter import (
+    CognitoSesStudentInviteAdapter,
+)
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    app.state.student_invite_service = _build_student_invite_service()
-    app.state.invite_repository = _build_invite_repository()
-    app.state.jwt_verifier = _build_jwt_verifier()
-    yield
+    table_name = os.getenv("GRADING_TABLE_NAME")
+    if not table_name:
+        raise RuntimeError("Missing GRADING_TABLE_NAME configuration.")
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    if not region:
+        raise RuntimeError("Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client.")
+    session = aiobotocore.session.get_session()
+    async with session.create_client("dynamodb", region_name=region) as dynamodb_client:
+        app.state.student_invite_service = _build_student_invite_service()
+        app.state.invite_repository = _build_invite_repository()
+        app.state.exam_ownership_repository = _build_exam_ownership_repository(
+            table_name, dynamodb_client
+        )
+        app.state.jwt_verifier = _build_jwt_verifier()
+        yield
 
 
 def _build_student_invite_service() -> CognitoSesStudentInviteAdapter:
@@ -42,6 +61,15 @@ def _build_invite_repository() -> DynamoDbInviteRepository:
     return DynamoDbInviteRepository(table_name=table_name)
 
 
+def _build_exam_ownership_repository(
+    table_name: str, dynamodb_client: Any
+) -> DynamoDbExamOwnershipRepository:
+    return DynamoDbExamOwnershipRepository(
+        table_name=table_name,
+        dynamodb_client=dynamodb_client,
+    )
+
+
 def _build_jwt_verifier() -> CognitoJwtVerifier:
     user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
     app_client_id = os.getenv("COGNITO_APP_CLIENT_ID")
@@ -56,6 +84,8 @@ def _build_jwt_verifier() -> CognitoJwtVerifier:
 
 
 app = FastAPI(title="exam-api", version="0.1.0", lifespan=_lifespan)
+
+register_http_error_handlers(app)
 
 app.include_router(auth_router)
 app.include_router(invite_router)

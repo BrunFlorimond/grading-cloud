@@ -17,3 +17,20 @@ class WeakPasswordError(AuthError):
 
 class InvalidCredentialsError(AuthError):
     """Raised when login credentials are invalid."""
+
+
+# TODO(#10): review whether InviteError should extend a broader DomainError base
+class InviteError(Exception):
+    """Base class for student invitation errors."""
+
+
+class ExamNotFoundError(InviteError):
+    """Raised when the target exam does not exist."""
+
+
+class ExamOwnershipError(InviteError):
+    """Raised when the requesting teacher does not own the exam."""
+
+
+class StudentAlreadyInvitedError(InviteError):
+    """Raised when the student has already been invited; re-invite re-sends the email."""

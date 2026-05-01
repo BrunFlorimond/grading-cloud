@@ -11,8 +11,8 @@ from grading_shared.domain.exam import Exam, ExamStatus
 from grading_shared.domain.models import NotationPayload
 from grading_shared.ports import ExamRepositoryPort
 
-from exam_api.application.invite_student import StudentScopeRepositoryPort
 from exam_api.domain.student import Student
+from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
 
 class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):

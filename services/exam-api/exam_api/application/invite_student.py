@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
 from grading_shared.domain.exam import Exam
 from grading_shared.ports import ExamRepositoryPort
 from grading_shared.domain.models import StrictModel
@@ -11,6 +9,7 @@ from pydantic import EmailStr
 
 from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
 from exam_api.domain.student import Student
+from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
 
@@ -25,14 +24,6 @@ class InviteStudentCommand(StrictModel):
 class InviteStudentResult(StrictModel):
     student: Student
     re_invited: bool
-
-
-@runtime_checkable
-class StudentScopeRepositoryPort(Protocol):
-    def upsert_student_scope(
-        self, *, student: Student, teacher_id: str, external_student_id: str
-    ) -> None:
-        """Persist student ownership scope for downstream authorization checks."""
 
 
 class InviteStudentUseCase:

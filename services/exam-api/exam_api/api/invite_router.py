@@ -13,10 +13,10 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentUseCase,
-    StudentScopeRepositoryPort,
 )
 from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
+from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
 router = APIRouter(prefix="/exams", tags=["invite"])

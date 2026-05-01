@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from grading_shared.domain.exam import Exam
 from grading_shared.ports import ExamRepositoryPort
 from grading_shared.domain.models import StrictModel
@@ -66,7 +64,7 @@ class InviteStudentUseCase:
         )
 
     async def _load_owned_exam(self, *, exam_id: str, teacher_id: str) -> Exam:
-        exam = await asyncio.to_thread(self._exam_repository.get_exam, exam_id=exam_id)
+        exam = await self._exam_repository.get_exam(exam_id=exam_id)
         if exam is None:
             raise ExamNotFoundError(f"Exam {exam_id} not found.")
         if exam.teacher_id != teacher_id:

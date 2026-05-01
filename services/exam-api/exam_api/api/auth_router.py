@@ -82,7 +82,6 @@ async def register(
     use_case: Annotated[RegisterTeacherUseCase, Depends(get_register_use_case)],
 ) -> RegisterResponse:
     try:
-        # TODO(#59): CognitoAuthAdapter.register_teacher must use aiobotocore before this await is truly non-blocking
         result = await use_case.execute(
             RegisterTeacherCommand(
                 email=body.email,
@@ -118,7 +117,6 @@ async def login(
     use_case: Annotated[LoginTeacherUseCase, Depends(get_login_use_case)],
 ) -> LoginResponse:
     try:
-        # TODO(#59): CognitoAuthAdapter.login_teacher must use aiobotocore before this await is truly non-blocking
         result = await use_case.execute(
             LoginTeacherCommand(email=body.email, password=body.password)
         )

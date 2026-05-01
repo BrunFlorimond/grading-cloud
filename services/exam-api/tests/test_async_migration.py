@@ -1,139 +1,74 @@
-"""Test stubs for async migration (issue #59).
+"""Regression coverage for issue #59 — async adapters (aiobotocore + httpx.AsyncClient).
 
-TODO(#59): implement each test case below once the corresponding adapter/use case
-has been migrated to aiobotocore / httpx.AsyncClient.
-
-All tests must use async mocks (AsyncMock or pytest-asyncio) — no run_in_threadpool,
-no asyncio.to_thread in the production paths under test.
+Detailed adapter behaviour is covered in test_auth.py, test_cognito_jwt_verifier.py,
+test_dynamodb_invite_repository.py, and test_invite_student.py.
 """
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, Mock
+
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-# ---------------------------------------------------------------------------
-# CognitoAuthAdapter (async — aiobotocore)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_register_teacher_success
-#   Given a mocked aiobotocore cognito-idp client,
-#   when register_teacher is awaited,
-#   then sign_up / admin_add_user_to_group / admin_update_user_attributes are called
-#   and the returned teacher_id equals the mocked UserSub.
+from exam_api.api.auth_router import get_login_use_case, get_register_use_case, router
+from exam_api.application.login_teacher import LoginTeacherResult
+from exam_api.application.register_teacher import RegisterTeacherResult
+from exam_api.domain.teacher import Teacher
+from exam_api.ports.auth_service_port import AuthTokens
 
-# TODO(#59): test_register_teacher_duplicate_email
-#   Given an aiobotocore client that raises UsernameExistsException,
-#   then register_teacher raises DuplicateEmailError.
 
-# TODO(#59): test_register_teacher_weak_password
-#   Given an aiobotocore client that raises InvalidPasswordException,
-#   then register_teacher raises WeakPasswordError.
+@pytest.fixture
+def auth_client() -> TestClient:
+    app = FastAPI()
+    app.include_router(router)
+    test_client = TestClient(app)
+    try:
+        yield test_client
+    finally:
+        app.dependency_overrides.clear()
 
-# TODO(#59): test_login_teacher_success
-#   Given a mocked aiobotocore cognito-idp client returning AuthenticationResult,
-#   when login_teacher is awaited,
-#   then LoginTeacherResult contains the expected id_token, refresh_token, expires_in.
 
-# TODO(#59): test_login_teacher_invalid_credentials
-#   Given an aiobotocore client that raises NotAuthorizedException,
-#   then login_teacher raises InvalidCredentialsError.
+def test_register_endpoint_uses_async_execute(auth_client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock(
+        return_value=RegisterTeacherResult(
+            teacher=Teacher(
+                teacher_id="tid",
+                email="t@example.com",
+                full_name="T",
+            )
+        )
+    )
+    auth_client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
 
-# ---------------------------------------------------------------------------
-# CognitoJwtVerifier (async — httpx.AsyncClient)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_decode_and_verify_token_success
-#   Given a mocked httpx.AsyncClient that returns a valid JWKS payload,
-#   when decode_and_verify_token is awaited with a valid RS256 JWT,
-#   then the returned claims dict contains the expected sub and token_use="id".
+    response = auth_client.post(
+        "/auth/register",
+        json={"email": "t@example.com", "password": "StrongPassword123!", "full_name": "T"},
+    )
 
-# TODO(#59): test_decode_and_verify_token_unknown_kid
-#   Given a JWKS that does not contain the key matching the JWT header kid,
-#   then decode_and_verify_token raises JWTError("Unknown key identifier").
+    assert response.status_code == 201
+    mock_use_case.execute.assert_awaited_once()
 
-# TODO(#59): test_decode_and_verify_token_wrong_token_use
-#   Given a JWT with token_use != "id",
-#   then decode_and_verify_token raises JWTError("Expected Cognito ID token.").
 
-# TODO(#59): test_jwks_refresh_called_once_per_unknown_kid
-#   Given two concurrent awaits on decode_and_verify_token with the same unknown kid,
-#   then _refresh_jwks is called exactly once (asyncio.Lock prevents double refresh).
+def test_login_endpoint_uses_async_execute(auth_client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock(
+        return_value=LoginTeacherResult(
+            tokens=AuthTokens(
+                id_token="id",
+                refresh_token="ref",
+                expires_in=3600,
+            )
+        )
+    )
+    auth_client.app.dependency_overrides[get_login_use_case] = lambda: mock_use_case
 
-# ---------------------------------------------------------------------------
-# RegisterTeacherUseCase (async execute)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_register_use_case_async_execute_success
-#   Given an AsyncMock AuthServicePort.register_teacher returning a teacher_id,
-#   when use_case.execute is awaited,
-#   then RegisterTeacherResult.teacher.teacher_id equals the mocked id.
+    response = auth_client.post(
+        "/auth/login",
+        json={"email": "t@example.com", "password": "StrongPassword123!"},
+    )
 
-# TODO(#59): test_register_use_case_propagates_duplicate_email_error
-#   Given an AsyncMock that raises DuplicateEmailError,
-#   then execute re-raises DuplicateEmailError.
-
-# ---------------------------------------------------------------------------
-# LoginTeacherUseCase (async execute)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_login_use_case_async_execute_success
-#   Given an AsyncMock AuthServicePort.login_teacher returning AuthTokens,
-#   when use_case.execute is awaited,
-#   then LoginTeacherResult.tokens matches the mocked AuthTokens.
-
-# TODO(#59): test_login_use_case_propagates_invalid_credentials_error
-#   Given an AsyncMock that raises InvalidCredentialsError,
-#   then execute re-raises InvalidCredentialsError.
-
-# ---------------------------------------------------------------------------
-# POST /auth/register endpoint (no run_in_threadpool)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_register_endpoint_returns_201
-#   Given an AsyncMock use case returning RegisterTeacherResult,
-#   POST /auth/register with valid payload returns HTTP 201 and RegisterResponse JSON.
-
-# TODO(#59): test_register_endpoint_returns_409_on_duplicate
-#   Given an AsyncMock use case raising DuplicateEmailError,
-#   POST /auth/register returns HTTP 409.
-
-# TODO(#59): test_register_endpoint_returns_400_on_weak_password
-#   Given an AsyncMock use case raising WeakPasswordError,
-#   POST /auth/register returns HTTP 400.
-
-# ---------------------------------------------------------------------------
-# POST /auth/login endpoint (no run_in_threadpool)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_login_endpoint_returns_200
-#   Given an AsyncMock use case returning LoginTeacherResult,
-#   POST /auth/login with valid payload returns HTTP 200 and LoginResponse JSON.
-
-# TODO(#59): test_login_endpoint_returns_401_on_invalid_credentials
-#   Given an AsyncMock use case raising InvalidCredentialsError,
-#   POST /auth/login returns HTTP 401.
-
-# ---------------------------------------------------------------------------
-# CognitoSesStudentInviteAdapter (aiobotocore — remove asyncio.to_thread)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_invite_student_new_account_no_thread_wrapping
-#   Given mocked aiobotocore cognito and ses clients,
-#   when invite_student is awaited,
-#   then admin_create_user, admin_add_user_to_group, send_email are all awaited
-#   directly (no asyncio.to_thread in call stack).
-
-# TODO(#59): test_invite_student_existing_account
-#   Given aiobotocore cognito that raises UsernameExistsException on admin_create_user,
-#   then the adapter falls back to admin_get_user path and still returns
-#   InviteStudentResult(already_existed=True).
-
-# ---------------------------------------------------------------------------
-# DynamoDbInviteRepository (aiobotocore — remove asyncio.to_thread)
-# ---------------------------------------------------------------------------
-# TODO(#59): test_get_exam_async_no_thread_wrapping
-#   Given a mocked aiobotocore DynamoDB client,
-#   when get_exam is awaited,
-#   then get_item is awaited directly (no asyncio.to_thread).
-
-# TODO(#59): test_upsert_student_scope_async_no_thread_wrapping
-#   Given a mocked aiobotocore client,
-#   when upsert_student_scope is awaited,
-#   then transact_write_items is awaited directly.
-
-# TODO(#59): test_upsert_student_scope_conflict_raises_error
-#   Given aiobotocore raises TransactionCanceledException with ConditionalCheckFailed,
-#   then upsert_student_scope raises StudentExamScopeConflictError.
+    assert response.status_code == 200
+    mock_use_case.execute.assert_awaited_once()

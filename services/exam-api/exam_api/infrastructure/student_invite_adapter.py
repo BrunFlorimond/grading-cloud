@@ -2,40 +2,33 @@
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 import string
 from typing import Any
 
-# TODO(#59): replace boto3 with aiobotocore once migration is complete.
-# WARNING: boto3 and aiobotocore clients cannot share the same event loop.
-# Replace ALL boto3 clients in this adapter atomically (cognito + ses).
-import boto3  # type: ignore[import-untyped]
+import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from exam_api.ports.student_invite_port import InviteStudentResult, StudentInviteServicePort
 
 
 class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
-    """Implements StudentInviteServicePort using Cognito AdminCreateUser + SES SendEmail.
-
-    TODO(#59): migrate _invite_student_sync and _send_invitation_email to native async
-    using aiobotocore, then remove asyncio.to_thread wrapping in invite_student.
-    """
+    """Implements StudentInviteServicePort using Cognito AdminCreateUser + SES SendEmail (aiobotocore)."""
 
     def __init__(
         self,
         *,
         user_pool_id: str,
         ses_from_address: str,
+        session: aiobotocore.session.AioSession | None = None,
         cognito_client: Any | None = None,
         ses_client: Any | None = None,
     ) -> None:
         self._user_pool_id = user_pool_id
         self._ses_from_address = ses_from_address
-        # TODO(#59): replace with aiobotocore async clients
-        self._cognito = cognito_client or boto3.client("cognito-idp")
-        self._ses = ses_client or boto3.client("ses")
+        self._session = session or aiobotocore.session.get_session()
+        self._injected_cognito = cognito_client
+        self._injected_ses = ses_client
 
     async def invite_student(
         self,
@@ -43,18 +36,34 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         student_email: str,
         exam_id: str,
     ) -> InviteStudentResult:
-        # TODO(#59): remove asyncio.to_thread — call aiobotocore methods directly with await
-        return await asyncio.to_thread(
-            self._invite_student_sync,
-            student_email,
-            exam_id,
-        )
+        if self._injected_cognito is not None and self._injected_ses is not None:
+            return await self._invite_with_clients(
+                self._injected_cognito,
+                self._injected_ses,
+                student_email=student_email,
+                exam_id=exam_id,
+            )
+        async with self._session.create_client("cognito-idp") as cognito:
+            async with self._session.create_client("ses") as ses:
+                return await self._invite_with_clients(
+                    cognito,
+                    ses,
+                    student_email=student_email,
+                    exam_id=exam_id,
+                )
 
-    def _invite_student_sync(self, student_email: str, exam_id: str) -> InviteStudentResult:
+    async def _invite_with_clients(
+        self,
+        cognito: Any,
+        ses: Any,
+        *,
+        student_email: str,
+        exam_id: str,
+    ) -> InviteStudentResult:
         temporary_password = self._generate_temporary_password()
         already_existed = False
         try:
-            response = self._cognito.admin_create_user(
+            response = await cognito.admin_create_user(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
                 TemporaryPassword=temporary_password,
@@ -70,18 +79,18 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             if self._extract_error_code(err) != "UsernameExistsException":
                 raise
             already_existed = True
-            existing_user = self._cognito.admin_get_user(
+            existing_user = await cognito.admin_get_user(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
             )
-            self._cognito.admin_update_user_attributes(
+            await cognito.admin_update_user_attributes(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
                 UserAttributes=[
                     {"Name": "custom:role", "Value": "student"},
                 ],
             )
-            self._cognito.admin_set_user_password(
+            await cognito.admin_set_user_password(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
                 Password=temporary_password,
@@ -89,12 +98,13 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             )
             cognito_sub = self._extract_user_sub(existing_user, student_email)
 
-        self._cognito.admin_add_user_to_group(
+        await cognito.admin_add_user_to_group(
             UserPoolId=self._user_pool_id,
             Username=student_email,
             GroupName="students",
         )
-        self._send_invitation_email(
+        await self._send_invitation_email(
+            ses,
             to_address=student_email,
             temporary_password=temporary_password,
             exam_id=exam_id,
@@ -104,8 +114,9 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             already_existed=already_existed,
         )
 
-    def _send_invitation_email(
+    async def _send_invitation_email(
         self,
+        ses: Any,
         *,
         to_address: str,
         temporary_password: str,
@@ -125,7 +136,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             f"<strong>Mot de passe temporaire:</strong> {temporary_password}</p>"
             "<p>Connectez-vous puis modifiez votre mot de passe des la premiere connexion.</p>"
         )
-        self._ses.send_email(
+        await ses.send_email(
             Source=self._ses_from_address,
             Destination={"ToAddresses": [to_address]},
             Message={

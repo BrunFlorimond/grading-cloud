@@ -23,13 +23,13 @@ class FileStoragePort(Protocol):
 
 @runtime_checkable
 class ExamRepositoryPort(Protocol):
-    def save_exam(self, exam: Exam) -> None:
+    async def save_exam(self, exam: Exam) -> None:
         """Persist an exam aggregate."""
 
-    def get_exam(self, *, exam_id: str) -> Exam | None:
+    async def get_exam(self, *, exam_id: str) -> Exam | None:
         """Load an exam aggregate by its identifier."""
 
-    def save_notation_payload(
+    async def save_notation_payload(
         self, *, exam_id: str, student_id: str, payload: NotationPayload
     ) -> None:
         """Persist a student's notation payload."""

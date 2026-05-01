@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -68,12 +68,15 @@ def client() -> TestClient:
         app.dependency_overrides.clear()
 
 
-def test_register_returns_teacher_with_cognito_sub() -> None:
+@pytest.mark.asyncio
+async def test_register_returns_teacher_with_cognito_sub() -> None:
     auth = Mock()
-    auth.register_teacher.return_value = "a1fdb8a9-4f65-4f3d-9f99-984f2634af11"
+    auth.register_teacher = AsyncMock(
+        return_value="a1fdb8a9-4f65-4f3d-9f99-984f2634af11"
+    )
     use_case = RegisterTeacherUseCase(auth_service=auth)
 
-    result = use_case.execute(
+    result = await use_case.execute(
         RegisterTeacherCommand(
             email="teacher@example.com",
             password="StrongPassword123!",
@@ -86,13 +89,14 @@ def test_register_returns_teacher_with_cognito_sub() -> None:
     assert result.teacher.full_name == "Ada Lovelace"
 
 
-def test_register_raises_duplicate_email_error() -> None:
+@pytest.mark.asyncio
+async def test_register_raises_duplicate_email_error() -> None:
     auth = Mock()
-    auth.register_teacher.side_effect = DuplicateEmailError("duplicate")
+    auth.register_teacher = AsyncMock(side_effect=DuplicateEmailError("duplicate"))
     use_case = RegisterTeacherUseCase(auth_service=auth)
 
     with pytest.raises(DuplicateEmailError):
-        use_case.execute(
+        await use_case.execute(
             RegisterTeacherCommand(
                 email="teacher@example.com",
                 password="StrongPassword123!",
@@ -101,13 +105,14 @@ def test_register_raises_duplicate_email_error() -> None:
         )
 
 
-def test_register_raises_weak_password_error() -> None:
+@pytest.mark.asyncio
+async def test_register_raises_weak_password_error() -> None:
     auth = Mock()
-    auth.register_teacher.side_effect = WeakPasswordError("weak password")
+    auth.register_teacher = AsyncMock(side_effect=WeakPasswordError("weak password"))
     use_case = RegisterTeacherUseCase(auth_service=auth)
 
     with pytest.raises(WeakPasswordError):
-        use_case.execute(
+        await use_case.execute(
             RegisterTeacherCommand(
                 email="teacher@example.com",
                 password="1234",
@@ -116,16 +121,19 @@ def test_register_raises_weak_password_error() -> None:
         )
 
 
-def test_login_returns_auth_tokens() -> None:
+@pytest.mark.asyncio
+async def test_login_returns_auth_tokens() -> None:
     auth = Mock()
-    auth.login_teacher.return_value = AuthTokens(
-        id_token="id.jwt.token",
-        refresh_token="refresh.token",
-        expires_in=3600,
+    auth.login_teacher = AsyncMock(
+        return_value=AuthTokens(
+            id_token="id.jwt.token",
+            refresh_token="refresh.token",
+            expires_in=3600,
+        )
     )
     use_case = LoginTeacherUseCase(auth_service=auth)
 
-    result = use_case.execute(
+    result = await use_case.execute(
         LoginTeacherCommand(email="teacher@example.com", password="StrongPassword123!")
     )
 
@@ -134,34 +142,38 @@ def test_login_returns_auth_tokens() -> None:
     assert result.tokens.expires_in == 3600
 
 
-def test_login_raises_invalid_credentials_error() -> None:
+@pytest.mark.asyncio
+async def test_login_raises_invalid_credentials_error() -> None:
     auth = Mock()
-    auth.login_teacher.side_effect = InvalidCredentialsError("invalid")
+    auth.login_teacher = AsyncMock(side_effect=InvalidCredentialsError("invalid"))
     use_case = LoginTeacherUseCase(auth_service=auth)
 
     with pytest.raises(InvalidCredentialsError):
-        use_case.execute(
+        await use_case.execute(
             LoginTeacherCommand(email="teacher@example.com", password="wrong-password")
         )
 
 
-def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
+@pytest.mark.asyncio
+async def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
     cognito = Mock()
-    cognito.sign_up.return_value = {"UserSub": "teacher-sub-uuid"}
+    cognito.sign_up = AsyncMock(return_value={"UserSub": "teacher-sub-uuid"})
+    cognito.admin_add_user_to_group = AsyncMock()
+    cognito.admin_update_user_attributes = AsyncMock()
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
         client_id="app-client-id",
         client=cognito,
     )
 
-    teacher_id = adapter.register_teacher(
+    teacher_id = await adapter.register_teacher(
         email="teacher@example.com",
         password="StrongPassword123!",
         full_name="Ada Lovelace",
     )
 
     assert teacher_id == "teacher-sub-uuid"
-    cognito.sign_up.assert_called_once_with(
+    cognito.sign_up.assert_awaited_once_with(
         ClientId="app-client-id",
         Username="teacher@example.com",
         Password="StrongPassword123!",
@@ -170,23 +182,26 @@ def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
             {"Name": "name", "Value": "Ada Lovelace"},
         ],
     )
-    cognito.admin_add_user_to_group.assert_called_once_with(
+    cognito.admin_add_user_to_group.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="teacher@example.com",
         GroupName="teachers",
     )
-    cognito.admin_update_user_attributes.assert_called_once_with(
+    cognito.admin_update_user_attributes.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="teacher@example.com",
         UserAttributes=[{"Name": "custom:role", "Value": "teacher"}],
     )
 
 
-def test_cognito_register_maps_username_exists_to_duplicate_email() -> None:
+@pytest.mark.asyncio
+async def test_cognito_register_maps_username_exists_to_duplicate_email() -> None:
     cognito = Mock()
-    cognito.sign_up.side_effect = _make_client_error(
-        "UsernameExistsException",
-        "User already exists",
+    cognito.sign_up = AsyncMock(
+        side_effect=_make_client_error(
+            "UsernameExistsException",
+            "User already exists",
+        )
     )
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
@@ -195,18 +210,21 @@ def test_cognito_register_maps_username_exists_to_duplicate_email() -> None:
     )
 
     with pytest.raises(DuplicateEmailError):
-        adapter.register_teacher(
+        await adapter.register_teacher(
             email="teacher@example.com",
             password="StrongPassword123!",
             full_name="Ada Lovelace",
         )
 
 
-def test_cognito_register_maps_invalid_password_to_weak_password() -> None:
+@pytest.mark.asyncio
+async def test_cognito_register_maps_invalid_password_to_weak_password() -> None:
     cognito = Mock()
-    cognito.sign_up.side_effect = _make_client_error(
-        "InvalidPasswordException",
-        "Password should contain special characters",
+    cognito.sign_up = AsyncMock(
+        side_effect=_make_client_error(
+            "InvalidPasswordException",
+            "Password should contain special characters",
+        )
     )
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
@@ -215,29 +233,32 @@ def test_cognito_register_maps_invalid_password_to_weak_password() -> None:
     )
 
     with pytest.raises(WeakPasswordError, match="special characters"):
-        adapter.register_teacher(
+        await adapter.register_teacher(
             email="teacher@example.com",
             password="weak",
             full_name="Ada Lovelace",
         )
 
 
-def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
+@pytest.mark.asyncio
+async def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
     cognito = Mock()
-    cognito.initiate_auth.return_value = {
-        "AuthenticationResult": {
-            "IdToken": "id.jwt.token",
-            "RefreshToken": "refresh.token",
-            "ExpiresIn": 3600,
+    cognito.initiate_auth = AsyncMock(
+        return_value={
+            "AuthenticationResult": {
+                "IdToken": "id.jwt.token",
+                "RefreshToken": "refresh.token",
+                "ExpiresIn": 3600,
+            }
         }
-    }
+    )
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
         client_id="app-client-id",
         client=cognito,
     )
 
-    tokens = adapter.login_teacher(
+    tokens = await adapter.login_teacher(
         email="teacher@example.com", password="StrongPassword123!"
     )
 
@@ -246,7 +267,7 @@ def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
         refresh_token="refresh.token",
         expires_in=3600,
     )
-    cognito.initiate_auth.assert_called_once_with(
+    cognito.initiate_auth.assert_awaited_once_with(
         ClientId="app-client-id",
         AuthFlow="USER_PASSWORD_AUTH",
         AuthParameters={
@@ -256,11 +277,14 @@ def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
     )
 
 
-def test_cognito_login_maps_not_authorized_to_invalid_credentials() -> None:
+@pytest.mark.asyncio
+async def test_cognito_login_maps_not_authorized_to_invalid_credentials() -> None:
     cognito = Mock()
-    cognito.initiate_auth.side_effect = _make_client_error(
-        "NotAuthorizedException",
-        "Incorrect username or password",
+    cognito.initiate_auth = AsyncMock(
+        side_effect=_make_client_error(
+            "NotAuthorizedException",
+            "Incorrect username or password",
+        )
     )
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
@@ -269,16 +293,18 @@ def test_cognito_login_maps_not_authorized_to_invalid_credentials() -> None:
     )
 
     with pytest.raises(InvalidCredentialsError):
-        adapter.login_teacher(email="teacher@example.com", password="wrong")
+        await adapter.login_teacher(email="teacher@example.com", password="wrong")
 
 
 def test_post_register_201_returns_teacher_id(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.return_value = RegisterTeacherResult(
-        teacher=Teacher(
-            teacher_id="teacher-sub-uuid",
-            email="teacher@example.com",
-            full_name="Ada Lovelace",
+    mock_use_case.execute = AsyncMock(
+        return_value=RegisterTeacherResult(
+            teacher=Teacher(
+                teacher_id="teacher-sub-uuid",
+                email="teacher@example.com",
+                full_name="Ada Lovelace",
+            )
         )
     )
     client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
@@ -302,7 +328,7 @@ def test_post_register_201_returns_teacher_id(client: TestClient) -> None:
 
 def test_post_register_409_duplicate_email(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = DuplicateEmailError("duplicate")
+    mock_use_case.execute = AsyncMock(side_effect=DuplicateEmailError("duplicate"))
     client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
 
     response = client.post(
@@ -320,7 +346,7 @@ def test_post_register_409_duplicate_email(client: TestClient) -> None:
 
 def test_post_register_400_weak_password(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = WeakPasswordError("Password too weak")
+    mock_use_case.execute = AsyncMock(side_effect=WeakPasswordError("Password too weak"))
     client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
 
     response = client.post(
@@ -338,11 +364,13 @@ def test_post_register_400_weak_password(client: TestClient) -> None:
 
 def test_post_login_200_returns_tokens(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.return_value = LoginTeacherResult(
-        tokens=AuthTokens(
-            id_token="id.jwt.token",
-            refresh_token="refresh.token",
-            expires_in=3600,
+    mock_use_case.execute = AsyncMock(
+        return_value=LoginTeacherResult(
+            tokens=AuthTokens(
+                id_token="id.jwt.token",
+                refresh_token="refresh.token",
+                expires_in=3600,
+            )
         )
     )
     client.app.dependency_overrides[get_login_use_case] = lambda: mock_use_case
@@ -362,7 +390,9 @@ def test_post_login_200_returns_tokens(client: TestClient) -> None:
 
 def test_post_login_401_invalid_credentials(client: TestClient) -> None:
     mock_use_case = Mock()
-    mock_use_case.execute.side_effect = InvalidCredentialsError("invalid credentials")
+    mock_use_case.execute = AsyncMock(
+        side_effect=InvalidCredentialsError("invalid credentials")
+    )
     client.app.dependency_overrides[get_login_use_case] = lambda: mock_use_case
 
     response = client.post(

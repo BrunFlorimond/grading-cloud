@@ -31,10 +31,8 @@ class RegisterTeacherUseCase:
     def __init__(self, auth_service: AuthServicePort) -> None:
         self._auth = auth_service
 
-    # TODO(#59): remove run_in_threadpool call in auth_router once this is async
     async def execute(self, command: RegisterTeacherCommand) -> RegisterTeacherResult:
         try:
-            # TODO(#59): await async CognitoAuthAdapter.register_teacher (aiobotocore)
             teacher_id = await self._auth.register_teacher(
                 email=str(command.email),
                 password=command.password.get_secret_value(),

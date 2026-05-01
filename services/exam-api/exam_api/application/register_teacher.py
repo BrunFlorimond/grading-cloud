@@ -31,9 +31,9 @@ class RegisterTeacherUseCase:
     def __init__(self, auth_service: AuthServicePort) -> None:
         self._auth = auth_service
 
-    def execute(self, command: RegisterTeacherCommand) -> RegisterTeacherResult:
+    async def execute(self, command: RegisterTeacherCommand) -> RegisterTeacherResult:
         try:
-            teacher_id = self._auth.register_teacher(
+            teacher_id = await self._auth.register_teacher(
                 email=str(command.email),
                 password=command.password.get_secret_value(),
                 full_name=command.full_name,

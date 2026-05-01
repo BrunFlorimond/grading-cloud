@@ -7,7 +7,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
-from starlette.concurrency import run_in_threadpool
 
 from exam_api.application.login_teacher import LoginTeacherCommand, LoginTeacherUseCase
 from exam_api.application.register_teacher import (
@@ -83,8 +82,7 @@ async def register(
     use_case: Annotated[RegisterTeacherUseCase, Depends(get_register_use_case)],
 ) -> RegisterResponse:
     try:
-        result = await run_in_threadpool(
-            use_case.execute,
+        result = await use_case.execute(
             RegisterTeacherCommand(
                 email=body.email,
                 password=body.password,
@@ -119,9 +117,8 @@ async def login(
     use_case: Annotated[LoginTeacherUseCase, Depends(get_login_use_case)],
 ) -> LoginResponse:
     try:
-        result = await run_in_threadpool(
-            use_case.execute,
-            LoginTeacherCommand(email=body.email, password=body.password),
+        result = await use_case.execute(
+            LoginTeacherCommand(email=body.email, password=body.password)
         )
     except InvalidCredentialsError as err:
         raise HTTPException(

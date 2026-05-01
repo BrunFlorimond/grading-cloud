@@ -29,9 +29,9 @@ class LoginTeacherUseCase:
     def __init__(self, auth_service: AuthServicePort) -> None:
         self._auth = auth_service
 
-    def execute(self, command: LoginTeacherCommand) -> LoginTeacherResult:
+    async def execute(self, command: LoginTeacherCommand) -> LoginTeacherResult:
         try:
-            tokens = self._auth.login_teacher(
+            tokens = await self._auth.login_teacher(
                 email=str(command.email),
                 password=command.password.get_secret_value(),
             )

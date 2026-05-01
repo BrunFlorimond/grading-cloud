@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import boto3  # type: ignore[import-untyped]
+import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from exam_api.domain.errors import (
@@ -16,22 +16,48 @@ from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
 
 
 class CognitoAuthAdapter(AuthServicePort):
-    """Implements AuthServicePort using AWS Cognito via boto3."""
+    """Implements AuthServicePort using AWS Cognito via aiobotocore."""
 
     def __init__(
         self,
         *,
         user_pool_id: str,
         client_id: str,
+        session: aiobotocore.session.AioSession | None = None,
         client: Any | None = None,
     ) -> None:
         self._user_pool_id = user_pool_id
         self._client_id = client_id
-        self._client = client or boto3.client("cognito-idp")
+        self._session = session or aiobotocore.session.get_session()
+        # Injected low-level client for tests (sync Mock methods replaced by AsyncMock in tests).
+        self._injected_client = client
 
-    def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+    async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+        if self._injected_client is not None:
+            return await self._register_teacher_with_client(
+                self._injected_client,
+                email=email,
+                password=password,
+                full_name=full_name,
+            )
+        async with self._session.create_client("cognito-idp") as client:
+            return await self._register_teacher_with_client(
+                client,
+                email=email,
+                password=password,
+                full_name=full_name,
+            )
+
+    async def _register_teacher_with_client(
+        self,
+        client: Any,
+        *,
+        email: str,
+        password: str,
+        full_name: str,
+    ) -> str:
         try:
-            sign_up_response = self._client.sign_up(
+            sign_up_response = await client.sign_up(
                 ClientId=self._client_id,
                 Username=email,
                 Password=password,
@@ -53,21 +79,41 @@ class CognitoAuthAdapter(AuthServicePort):
                 raise WeakPasswordError(message) from err
             raise
 
-        self._client.admin_add_user_to_group(
+        await client.admin_add_user_to_group(
             UserPoolId=self._user_pool_id,
             Username=email,
             GroupName="teachers",
         )
-        self._client.admin_update_user_attributes(
+        await client.admin_update_user_attributes(
             UserPoolId=self._user_pool_id,
             Username=email,
             UserAttributes=[{"Name": "custom:role", "Value": "teacher"}],
         )
         return str(sign_up_response["UserSub"])
 
-    def login_teacher(self, *, email: str, password: str) -> AuthTokens:
+    async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
+        if self._injected_client is not None:
+            return await self._login_teacher_with_client(
+                self._injected_client,
+                email=email,
+                password=password,
+            )
+        async with self._session.create_client("cognito-idp") as client:
+            return await self._login_teacher_with_client(
+                client,
+                email=email,
+                password=password,
+            )
+
+    async def _login_teacher_with_client(
+        self,
+        client: Any,
+        *,
+        email: str,
+        password: str,
+    ) -> AuthTokens:
         try:
-            response = self._client.initiate_auth(
+            response = await client.initiate_auth(
                 ClientId=self._client_id,
                 AuthFlow="USER_PASSWORD_AUTH",
                 AuthParameters={"USERNAME": email, "PASSWORD": password},

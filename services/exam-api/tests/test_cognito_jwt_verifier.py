@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from jose import JWTError
 
@@ -21,7 +23,10 @@ class _FakeResponse:
         return self._payload
 
 
-def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     verifier = CognitoJwtVerifier(
         issuer="https://issuer.example.com/pool",
         audience="app-client-id",
@@ -42,31 +47,45 @@ def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(monkeypatch: pyt
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
         decode_mock,
     )
+    mock_response = _FakeResponse(
+        {
+            "keys": [
+                {
+                    "kid": "kid-1",
+                    "kty": "RSA",
+                    "alg": "RS256",
+                    "use": "sig",
+                    "n": "abc",
+                    "e": "AQAB",
+                }
+            ]
+        }
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
     monkeypatch.setattr(
-        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
-        lambda url, timeout: _FakeResponse(
-            {
-                "keys": [
-                    {
-                        "kid": "kid-1",
-                        "kty": "RSA",
-                        "alg": "RS256",
-                        "use": "sig",
-                        "n": "abc",
-                        "e": "AQAB",
-                    }
-                ]
-            }
-        ),
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
     )
 
-    claims = verifier.decode_and_verify_token("header.payload.signature")
+    claims = await verifier.decode_and_verify_token("header.payload.signature")
 
     assert claims["sub"] == "teacher-1"
     assert decode_mock.call_count == 1
 
 
-def test_decode_and_verify_token_rejects_non_id_token(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_decode_and_verify_token_rejects_non_id_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     verifier = CognitoJwtVerifier(
         issuer="https://issuer.example.com/pool",
         audience="app-client-id",
@@ -75,22 +94,33 @@ def test_decode_and_verify_token_rejects_non_id_token(monkeypatch: pytest.Monkey
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
         lambda token: {"kid": "kid-1"},
     )
+    mock_response = _FakeResponse(
+        {
+            "keys": [
+                {
+                    "kid": "kid-1",
+                    "kty": "RSA",
+                    "alg": "RS256",
+                    "use": "sig",
+                    "n": "abc",
+                    "e": "AQAB",
+                }
+            ]
+        }
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
     monkeypatch.setattr(
-        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
-        lambda url, timeout: _FakeResponse(
-            {
-                "keys": [
-                    {
-                        "kid": "kid-1",
-                        "kty": "RSA",
-                        "alg": "RS256",
-                        "use": "sig",
-                        "n": "abc",
-                        "e": "AQAB",
-                    }
-                ]
-            }
-        ),
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
     )
     monkeypatch.setattr(
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
@@ -98,10 +128,13 @@ def test_decode_and_verify_token_rejects_non_id_token(monkeypatch: pytest.Monkey
     )
 
     with pytest.raises(JWTError, match="Expected Cognito ID token"):
-        verifier.decode_and_verify_token("header.payload.signature")
+        await verifier.decode_and_verify_token("header.payload.signature")
 
 
-def test_decode_and_verify_token_fails_when_kid_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_decode_and_verify_token_fails_when_kid_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     verifier = CognitoJwtVerifier(
         issuer="https://issuer.example.com/pool",
         audience="app-client-id",
@@ -110,10 +143,81 @@ def test_decode_and_verify_token_fails_when_kid_not_found(monkeypatch: pytest.Mo
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
         lambda token: {"kid": "kid-missing"},
     )
+    mock_response = _FakeResponse({"keys": []})
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
     monkeypatch.setattr(
-        "exam_api.infrastructure.cognito_jwt_verifier.httpx.get",
-        lambda url, timeout: _FakeResponse({"keys": []}),
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
     )
 
     with pytest.raises(JWTError):
-        verifier.decode_and_verify_token("header.payload.signature")
+        await verifier.decode_and_verify_token("header.payload.signature")
+
+
+@pytest.mark.asyncio
+async def test_jwks_refresh_called_once_for_concurrent_unknown_kid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-new"},
+    )
+    decode_mock = Mock(
+        return_value={
+            "sub": "u",
+            "token_use": "id",
+        }
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
+        decode_mock,
+    )
+
+    mock_response = _FakeResponse(
+        {
+            "keys": [
+                {
+                    "kid": "kid-new",
+                    "kty": "RSA",
+                    "alg": "RS256",
+                    "use": "sig",
+                    "n": "abc",
+                    "e": "AQAB",
+                }
+            ]
+        }
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
+    )
+
+    await asyncio.gather(
+        verifier.decode_and_verify_token("t1"),
+        verifier.decode_and_verify_token("t2"),
+    )
+
+    assert mock_client.get.await_count == 1

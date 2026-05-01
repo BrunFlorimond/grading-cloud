@@ -45,13 +45,21 @@ def client() -> TestClient:
     app.include_router(router)
     app.state.student_invite_service = Mock(spec=["invite_student"])
     invite_repository = Mock()
-    invite_repository.get_exam = Mock()
-    invite_repository.save_exam = Mock()
-    invite_repository.save_notation_payload = Mock()
+    invite_repository.get_exam = AsyncMock()
+    invite_repository.save_exam = AsyncMock()
+    invite_repository.save_notation_payload = AsyncMock()
     invite_repository.upsert_student_scope = AsyncMock()
     invite_repository.get_student_scope = AsyncMock()
     app.state.invite_repository = invite_repository
-    app.state.jwt_verifier = Mock(spec=["decode_and_verify_token"])
+    jwt_verifier = Mock(spec=["decode_and_verify_token"])
+    jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "teacher-1",
+            "custom:role": "teacher",
+            "token_use": "id",
+        }
+    )
+    app.state.jwt_verifier = jwt_verifier
     test_client = TestClient(app)
     try:
         yield test_client
@@ -90,11 +98,13 @@ async def test_use_case_returns_new_invite_result() -> None:
         )
     )
     exam_repository = Mock()
-    exam_repository.get_exam.return_value = Exam(
-        exam_id="exam-1",
-        teacher_id="teacher-1",
-        title="Math Midterm",
-        status=ExamStatus.DRAFT,
+    exam_repository.get_exam = AsyncMock(
+        return_value=Exam(
+            exam_id="exam-1",
+            teacher_id="teacher-1",
+            title="Math Midterm",
+            status=ExamStatus.DRAFT,
+        )
     )
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
@@ -140,11 +150,13 @@ async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     exam_repository = Mock()
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
-    exam_repository.get_exam.return_value = Exam(
-        exam_id="exam-1",
-        teacher_id="teacher-1",
-        title="Math Midterm",
-        status=ExamStatus.DRAFT,
+    exam_repository.get_exam = AsyncMock(
+        return_value=Exam(
+            exam_id="exam-1",
+            teacher_id="teacher-1",
+            title="Math Midterm",
+            status=ExamStatus.DRAFT,
+        )
     )
     use_case = _build_use_case(
         invite_service=invite_service,
@@ -177,11 +189,13 @@ async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
     )
     exam_repository = Mock()
     student_scope_repository = Mock()
-    exam_repository.get_exam.return_value = Exam(
-        exam_id="exam-1",
-        teacher_id="teacher-1",
-        title="Math Midterm",
-        status=ExamStatus.DRAFT,
+    exam_repository.get_exam = AsyncMock(
+        return_value=Exam(
+            exam_id="exam-1",
+            teacher_id="teacher-1",
+            title="Math Midterm",
+            status=ExamStatus.DRAFT,
+        )
     )
     student_scope_repository.upsert_student_scope = AsyncMock(
         side_effect=StudentExamScopeConflictError(
@@ -211,7 +225,7 @@ async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
 @pytest.mark.asyncio
 async def test_use_case_raises_exam_not_found() -> None:
     exam_repository = Mock()
-    exam_repository.get_exam.return_value = None
+    exam_repository.get_exam = AsyncMock(return_value=None)
     use_case = _build_use_case(exam_repository=exam_repository)
 
     with pytest.raises(ExamNotFoundError):
@@ -228,11 +242,13 @@ async def test_use_case_raises_exam_not_found() -> None:
 @pytest.mark.asyncio
 async def test_use_case_raises_exam_ownership_error() -> None:
     exam_repository = Mock()
-    exam_repository.get_exam.return_value = Exam(
-        exam_id="exam-1",
-        teacher_id="teacher-owner",
-        title="Math Midterm",
-        status=ExamStatus.DRAFT,
+    exam_repository.get_exam = AsyncMock(
+        return_value=Exam(
+            exam_id="exam-1",
+            teacher_id="teacher-owner",
+            title="Math Midterm",
+            status=ExamStatus.DRAFT,
+        )
     )
     use_case = _build_use_case(exam_repository=exam_repository)
 
@@ -251,14 +267,18 @@ async def test_use_case_raises_exam_ownership_error() -> None:
 async def test_adapter_creates_cognito_user_and_sends_email() -> None:
     cognito = Mock()
     ses = Mock()
-    cognito.admin_create_user.return_value = {
-        "User": {
-            "Attributes": [
-                {"Name": "sub", "Value": "student-sub-123"},
-                {"Name": "email", "Value": "student@example.com"},
-            ]
+    cognito.admin_create_user = AsyncMock(
+        return_value={
+            "User": {
+                "Attributes": [
+                    {"Name": "sub", "Value": "student-sub-123"},
+                    {"Name": "email", "Value": "student@example.com"},
+                ]
+            }
         }
-    }
+    )
+    cognito.admin_add_user_to_group = AsyncMock()
+    ses.send_email = AsyncMock()
     adapter = CognitoSesStudentInviteAdapter(
         user_pool_id="pool-id",
         ses_from_address="noreply@example.com",
@@ -270,31 +290,49 @@ async def test_adapter_creates_cognito_user_and_sends_email() -> None:
 
     assert result.cognito_sub == "student-sub-123"
     assert result.already_existed is False
-    cognito.admin_create_user.assert_called_once()
+    cognito.admin_create_user.assert_awaited_once()
     create_call = cognito.admin_create_user.call_args.kwargs
     assert create_call["MessageAction"] == "SUPPRESS"
     assert {"Name": "custom:role", "Value": "student"} in create_call["UserAttributes"]
-    cognito.admin_add_user_to_group.assert_called_once_with(
+    cognito.admin_add_user_to_group.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="student@example.com",
         GroupName="students",
     )
-    ses.send_email.assert_called_once()
+    ses.send_email.assert_awaited_once()
+
+
+def test_adapter_rejects_partial_injected_clients() -> None:
+    with pytest.raises(ValueError, match="both be injected or both omitted"):
+        CognitoSesStudentInviteAdapter(
+            user_pool_id="pool-id",
+            ses_from_address="noreply@example.com",
+            cognito_client=Mock(),
+            ses_client=None,
+        )
 
 
 @pytest.mark.asyncio
 async def test_adapter_handles_existing_user_without_duplicate_account() -> None:
     cognito = Mock()
     ses = Mock()
-    cognito.admin_create_user.side_effect = _make_client_error(
-        "UsernameExistsException",
-        "Already exists",
+    cognito.admin_create_user = AsyncMock(
+        side_effect=_make_client_error(
+            "UsernameExistsException",
+            "Already exists",
+        )
     )
-    cognito.admin_get_user.return_value = {
-        "UserAttributes": [
-            {"Name": "sub", "Value": "existing-sub"},
-        ]
-    }
+    cognito.admin_get_user = AsyncMock(
+        return_value={
+            "UserAttributes": [
+                {"Name": "sub", "Value": "existing-sub"},
+            ]
+        }
+    )
+    cognito.admin_update_user_attributes = AsyncMock()
+    cognito.admin_set_user_password = AsyncMock()
+    cognito.admin_add_user_to_group = AsyncMock()
+    ses.send_email = AsyncMock()
     adapter = CognitoSesStudentInviteAdapter(
         user_pool_id="pool-id",
         ses_from_address="noreply@example.com",
@@ -306,10 +344,10 @@ async def test_adapter_handles_existing_user_without_duplicate_account() -> None
 
     assert result.cognito_sub == "existing-sub"
     assert result.already_existed is True
-    cognito.admin_get_user.assert_called_once()
-    cognito.admin_set_user_password.assert_called_once()
-    cognito.admin_add_user_to_group.assert_called_once()
-    ses.send_email.assert_called_once()
+    cognito.admin_get_user.assert_awaited_once()
+    cognito.admin_set_user_password.assert_awaited_once()
+    cognito.admin_add_user_to_group.assert_awaited_once()
+    ses.send_email.assert_awaited_once()
 
 
 def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
@@ -424,8 +462,8 @@ def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> N
 def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock()
-    client.app.state.jwt_verifier.decode_and_verify_token.side_effect = JWTError(
-        "invalid token"
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        side_effect=JWTError("invalid token")
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
 
@@ -442,10 +480,12 @@ def test_api_returns_401_when_token_invalid(client: TestClient) -> None:
 def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock()
-    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
-        "sub": "teacher-1",
-        "custom:role": "student",
-    }
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "teacher-1",
+            "custom:role": "student",
+        }
+    )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
 
     response = client.post(
@@ -461,11 +501,13 @@ def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
 def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client: TestClient,
 ) -> None:
-    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
-        "sub": "student-sub-123",
-        "custom:role": "student",
-        "token_use": "id",
-    }
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "student-sub-123",
+            "custom:role": "student",
+            "token_use": "id",
+        }
+    )
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
@@ -488,11 +530,13 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
 
 
 def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) -> None:
-    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
-        "sub": "student-sub-abc",
-        "custom:role": "student",
-        "token_use": "id",
-    }
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "student-sub-abc",
+            "custom:role": "student",
+            "token_use": "id",
+        }
+    )
 
     response = client.get(
         "/exams/exam-1/students/student-sub-xyz/scope",
@@ -503,12 +547,14 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
 
 
 def test_student_scope_endpoint_ignores_custom_exam_id_claim(client: TestClient) -> None:
-    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
-        "sub": "student-sub-123",
-        "custom:role": "student",
-        "custom:exam_id": "exam-from-token",
-        "token_use": "id",
-    }
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "student-sub-123",
+            "custom:role": "student",
+            "custom:exam_id": "exam-from-token",
+            "token_use": "id",
+        }
+    )
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
@@ -529,11 +575,13 @@ def test_student_scope_endpoint_ignores_custom_exam_id_claim(client: TestClient)
 def test_student_scope_endpoint_returns_404_when_scope_is_missing(
     client: TestClient,
 ) -> None:
-    client.app.state.jwt_verifier.decode_and_verify_token.return_value = {
-        "sub": "student-sub-123",
-        "custom:role": "student",
-        "token_use": "id",
-    }
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "student-sub-123",
+            "custom:role": "student",
+            "token_use": "id",
+        }
+    )
     client.app.state.invite_repository.get_student_scope = AsyncMock(return_value=None)
 
     response = client.get(

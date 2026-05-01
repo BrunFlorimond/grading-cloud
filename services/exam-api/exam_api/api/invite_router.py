@@ -61,7 +61,7 @@ class StudentScopeResponse(BaseModel):
     email: EmailStr
 
 
-def get_current_teacher(
+async def get_current_teacher(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentTeacher:
@@ -78,7 +78,7 @@ def get_current_teacher(
         )
     jwt_verifier = get_jwt_verifier(request)
     try:
-        claims = jwt_verifier.decode_and_verify_token(token)
+        claims = await jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -99,7 +99,7 @@ def get_current_teacher(
     return CurrentTeacher(teacher_id=teacher_id)
 
 
-def get_current_student(
+async def get_current_student(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentStudent:
@@ -116,7 +116,7 @@ def get_current_student(
         )
     jwt_verifier = get_jwt_verifier(request)
     try:
-        claims = jwt_verifier.decode_and_verify_token(token)
+        claims = await jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

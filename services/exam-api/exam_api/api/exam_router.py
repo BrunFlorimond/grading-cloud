@@ -19,7 +19,7 @@ router = APIRouter(prefix="/exams", tags=["exams"])
 class CreateExamRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    title: str = Field(..., max_length=120)
+    title: str = Field(..., min_length=1, max_length=120)
     description: str | None = None
     subject: str | None = None
 

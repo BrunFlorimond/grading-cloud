@@ -35,6 +35,9 @@ class Exam(StrictModel):
     teacher_id: str
     title: str
     status: ExamStatus = ExamStatus.DRAFT
+    description: str | None = None
+    subject: str | None = None
+    created_at: str | None = None
 
     def can_transition_to(self, target_status: ExamStatus) -> bool:
         return target_status in _ALLOWED_TRANSITIONS[self.status]

@@ -10,9 +10,13 @@ import aiobotocore.session
 from fastapi import FastAPI
 
 from exam_api.api.auth_router import router as auth_router
+from exam_api.api.exam_router import router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import router as invite_router
 from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
+from exam_api.infrastructure.dynamodb_exam_creation_repository import (
+    DynamoDbExamCreationRepository,
+)
 from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
     DynamoDbExamOwnershipRepository,
 )
@@ -36,6 +40,10 @@ async def _lifespan(app: FastAPI):
         app.state.invite_repository = _build_invite_repository()
         app.state.exam_ownership_repository = _build_exam_ownership_repository(
             table_name, dynamodb_client
+        )
+        app.state.exam_creation_repository = DynamoDbExamCreationRepository(
+            table_name=table_name,
+            dynamodb_client=dynamodb_client,
         )
         app.state.jwt_verifier = _build_jwt_verifier()
         yield
@@ -89,3 +97,4 @@ register_http_error_handlers(app)
 
 app.include_router(auth_router)
 app.include_router(invite_router)
+app.include_router(exam_router)

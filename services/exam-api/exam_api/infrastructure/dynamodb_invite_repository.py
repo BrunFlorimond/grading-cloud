@@ -134,11 +134,24 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
             except ValueError:
                 status = ExamStatus.DRAFT
 
+            description = flat.get("description")
+            if description is not None and not isinstance(description, str):
+                description = None
+            subject = flat.get("subject")
+            if subject is not None and not isinstance(subject, str):
+                subject = None
+            created_at = flat.get("created_at")
+            if created_at is not None and not isinstance(created_at, str):
+                created_at = None
+
             return Exam(
                 exam_id=exam_id,
                 teacher_id=teacher_id,
                 title=title,
                 status=status,
+                description=description,
+                subject=subject,
+                created_at=created_at,
             )
 
         return await self._use_client(_get)
@@ -151,6 +164,12 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
             "title": exam.title,
             "status": exam.status.value,
         }
+        if exam.description is not None:
+            raw["description"] = exam.description
+        if exam.subject is not None:
+            raw["subject"] = exam.subject
+        if exam.created_at is not None:
+            raw["created_at"] = exam.created_at
         item = {k: _ddb_serialize(v) for k, v in raw.items()}
 
         async def _put(client: Any) -> None:

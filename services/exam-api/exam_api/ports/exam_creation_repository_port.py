@@ -18,14 +18,7 @@ class ExamPage(StrictModel):
 @runtime_checkable
 class ExamCreationRepositoryPort(Protocol):
     async def create_exam(self, exam: Exam) -> None:
-        """Persist a newly created exam.
-
-        Must write two items atomically:
-          - PK=EXAM#{exam_id}           SK=METADATA          (exam data + created_at)
-          - PK=TEACHER#{teacher_id}     SK=EXAM#{exam_id}    (ownership edge + created_at)
-
-        TODO(#13): add description and subject once the shared Exam model is extended.
-        """
+        """Persist a newly created exam (metadata, ownership edge, and time-sorted list edge)."""
         ...
 
     async def list_teacher_exams(

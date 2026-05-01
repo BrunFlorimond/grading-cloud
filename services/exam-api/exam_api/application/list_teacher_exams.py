@@ -20,5 +20,8 @@ class ListTeacherExamsUseCase:
         self._exam_repository = exam_repository
 
     async def execute(self, command: ListTeacherExamsCommand) -> ExamPage:
-        # TODO(#13): delegate to exam_repository.list_teacher_exams with cursor and limit
-        raise NotImplementedError
+        return await self._exam_repository.list_teacher_exams(
+            teacher_id=command.teacher_id,
+            limit=command.limit,
+            cursor=command.cursor,
+        )

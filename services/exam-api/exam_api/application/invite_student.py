@@ -29,7 +29,9 @@ class InviteStudentResult(StrictModel):
 
 @runtime_checkable
 class StudentScopeRepositoryPort(Protocol):
-    def upsert_student_scope(self, *, student: Student, teacher_id: str) -> None:
+    def upsert_student_scope(
+        self, *, student: Student, teacher_id: str, external_student_id: str
+    ) -> None:
         """Persist student ownership scope for downstream authorization checks."""
 
 
@@ -61,6 +63,7 @@ class InviteStudentUseCase:
         self._student_scope_repository.upsert_student_scope(
             student=student,
             teacher_id=command.teacher_id,
+            external_student_id=command.student_id,
         )
         return InviteStudentResult(
             student=student,

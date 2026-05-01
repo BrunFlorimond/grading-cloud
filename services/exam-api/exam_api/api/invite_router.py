@@ -16,7 +16,7 @@ from exam_api.application.invite_student import (
     StudentScopeRepositoryPort,
 )
 from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
-from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
+from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
 router = APIRouter(prefix="/exams", tags=["invite"])
@@ -108,9 +108,9 @@ def get_student_scope_repository(request: Request) -> StudentScopeRepositoryPort
     return repository
 
 
-def get_jwt_verifier(request: Request) -> CognitoJwtVerifier:
+def get_jwt_verifier(request: Request) -> JwtVerifierPort:
     verifier = getattr(request.app.state, "jwt_verifier", None)
-    if not isinstance(verifier, CognitoJwtVerifier) and not hasattr(
+    if not isinstance(verifier, JwtVerifierPort) and not hasattr(
         verifier, "decode_teacher_token"
     ):
         raise RuntimeError("Missing JWT verifier configuration.")

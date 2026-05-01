@@ -59,7 +59,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 Username=student_email,
                 UserAttributes=[
                     {"Name": "custom:role", "Value": "student"},
-                    {"Name": "custom:exam_id", "Value": exam_id},
                 ],
             )
             self._cognito.admin_set_user_password(

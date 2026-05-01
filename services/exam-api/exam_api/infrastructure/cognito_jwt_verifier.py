@@ -35,6 +35,9 @@ class CognitoJwtVerifier:
             audience=self._audience,
             issuer=self._issuer,
         )
+        token_use = claims.get("token_use")
+        if token_use != "id":
+            raise JWTError("Expected Cognito ID token.")
         return claims
 
     def _refresh_jwks(self) -> None:

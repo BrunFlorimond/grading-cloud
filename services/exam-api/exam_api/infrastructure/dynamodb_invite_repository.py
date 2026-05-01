@@ -73,7 +73,9 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
             }
         )
 
-    def upsert_student_scope(self, *, student: Student, teacher_id: str) -> None:
+    def upsert_student_scope(
+        self, *, student: Student, teacher_id: str, external_student_id: str
+    ) -> None:
         now_iso = datetime.now(UTC).isoformat()
         self._table.put_item(
             Item={
@@ -81,6 +83,7 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
                 "SK": f"STUDENT#{student.student_id}",
                 "teacher_id": teacher_id,
                 "student_id": student.student_id,
+                "external_student_id": external_student_id,
                 "email": str(student.email),
                 "invited_at": now_iso,
                 "updated_at": now_iso,

@@ -13,3 +13,6 @@ class StudentScopeRepositoryPort(Protocol):
         self, *, student: Student, teacher_id: str, external_student_id: str
     ) -> None:
         """Persist student ownership scope for downstream authorization checks."""
+
+    def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
+        """Load a student scope record by exam and Cognito subject."""

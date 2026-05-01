@@ -66,6 +66,30 @@ def test_upsert_student_scope_writes_student_item() -> None:
     assert called_item["email"] == "student@example.com"
 
 
+def test_get_student_scope_returns_student_record() -> None:
+    table = Mock()
+    table.get_item.return_value = {
+        "Item": {
+            "PK": "EXAM#exam-1",
+            "SK": "STUDENT#student-sub-1",
+            "email": "student@example.com",
+        }
+    }
+    dynamodb = Mock()
+    dynamodb.Table.return_value = table
+    repository = DynamoDbInviteRepository(
+        table_name="grading-table",
+        dynamodb_resource=dynamodb,
+    )
+
+    student = repository.get_student_scope(exam_id="exam-1", student_sub="student-sub-1")
+
+    assert student is not None
+    assert student.student_id == "student-sub-1"
+    assert student.exam_id == "exam-1"
+    assert str(student.email) == "student@example.com"
+
+
 def test_save_notation_payload_persists_payload_under_student_key() -> None:
     table = Mock()
     dynamodb = Mock()

@@ -89,3 +89,19 @@ class DynamoDbInviteRepository(ExamRepositoryPort, StudentScopeRepositoryPort):
                 "updated_at": now_iso,
             }
         )
+
+    def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
+        response = self._table.get_item(
+            Key={
+                "PK": f"EXAM#{exam_id}",
+                "SK": f"STUDENT#{student_sub}",
+            },
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not isinstance(item, dict):
+            return None
+        email = item.get("email")
+        if not isinstance(email, str) or not email:
+            return None
+        return Student(student_id=student_sub, exam_id=exam_id, email=email)

@@ -40,7 +40,9 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.state.student_invite_service = Mock(spec=["invite_student"])
-    app.state.invite_repository = Mock()
+    app.state.invite_repository = Mock(
+        spec=["get_exam", "upsert_student_scope", "get_student_scope"]
+    )
     app.state.jwt_verifier = Mock(spec=["decode_teacher_token"])
     test_client = TestClient(app)
     try:
@@ -354,3 +356,47 @@ def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
 
     assert response.status_code == 403
     mock_use_case.execute.assert_not_called()
+
+
+def test_student_scope_endpoint_returns_200_for_matching_student_scope(
+    client: TestClient,
+) -> None:
+    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+        "sub": "student-sub-123",
+        "custom:role": "student",
+        "custom:exam_id": "exam-1",
+        "token_use": "id",
+    }
+    client.app.state.invite_repository.get_student_scope.return_value = Student(
+        student_id="student-sub-123",
+        exam_id="exam-1",
+        email="student@example.com",
+    )
+
+    response = client.get(
+        "/exams/exam-1/students/student-sub-123/scope",
+        headers={"Authorization": "Bearer valid.token.value"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "student_id": "student-sub-123",
+        "exam_id": "exam-1",
+        "email": "student@example.com",
+    }
+
+
+def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) -> None:
+    client.app.state.jwt_verifier.decode_teacher_token.return_value = {
+        "sub": "student-sub-abc",
+        "custom:role": "student",
+        "custom:exam_id": "exam-1",
+        "token_use": "id",
+    }
+
+    response = client.get(
+        "/exams/exam-1/students/student-sub-xyz/scope",
+        headers={"Authorization": "Bearer valid.token.value"},
+    )
+
+    assert response.status_code == 403

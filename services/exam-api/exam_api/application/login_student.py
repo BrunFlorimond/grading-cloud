@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
-from pydantic import EmailStr, SecretStr, field_validator
+from pydantic import EmailStr, SecretStr, field_validator, model_validator
 
-from exam_api.domain.errors import InvalidCredentialsError
 from exam_api.ports.auth_service_port import AuthChallenge, AuthServicePort, AuthTokens
 
 
@@ -22,10 +21,16 @@ class LoginStudentCommand(StrictModel):
 
 
 class LoginStudentResult(StrictModel):
-    # TODO(#11): exactly one of tokens or challenge will be set; consider
-    #            replacing with a tagged union once the API contract is finalised.
     tokens: AuthTokens | None = None
     challenge: AuthChallenge | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_outcome(self) -> LoginStudentResult:
+        has_tokens = self.tokens is not None
+        has_challenge = self.challenge is not None
+        if has_tokens == has_challenge:
+            raise ValueError("Exactly one of tokens or challenge must be set.")
+        return self
 
 
 class LoginStudentUseCase:
@@ -33,5 +38,10 @@ class LoginStudentUseCase:
         self._auth = auth_service
 
     async def execute(self, command: LoginStudentCommand) -> LoginStudentResult:
-        # TODO(#11): call self._auth.login_student(), map result to LoginStudentResult
-        raise NotImplementedError
+        outcome = await self._auth.login_student(
+            email=str(command.email),
+            password=command.password.get_secret_value(),
+        )
+        if isinstance(outcome, AuthChallenge):
+            return LoginStudentResult(tokens=None, challenge=outcome)
+        return LoginStudentResult(tokens=outcome, challenge=None)

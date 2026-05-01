@@ -5,7 +5,6 @@ from __future__ import annotations
 from grading_shared.domain.models import StrictModel
 from pydantic import EmailStr, SecretStr, field_validator
 
-from exam_api.domain.errors import InvalidCredentialsError
 from exam_api.ports.auth_service_port import AuthServicePort, AuthTokens
 
 
@@ -38,6 +37,9 @@ class ChangeStudentPasswordUseCase:
         self._auth = auth_service
 
     async def execute(self, command: ChangeStudentPasswordCommand) -> ChangeStudentPasswordResult:
-        # TODO(#11): call self._auth.respond_to_new_password_challenge(),
-        #            re-raise WeakPasswordError / InvalidCredentialsError as-is.
-        raise NotImplementedError
+        tokens = await self._auth.respond_to_new_password_challenge(
+            email=str(command.email),
+            session=command.session,
+            new_password=command.new_password.get_secret_value(),
+        )
+        return ChangeStudentPasswordResult(tokens=tokens)

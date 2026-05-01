@@ -140,15 +140,12 @@ async def login(
 
 # ---------------------------------------------------------------------------
 # Student login (may return NEW_PASSWORD_REQUIRED challenge)
-# TODO(#11): if LoginResponse schema changes, update existing teachers login too.
 # ---------------------------------------------------------------------------
 
 class StudentLoginResponse(BaseModel):
-    """Response for POST /auth/login when the student has a temporary password."""
+    """Response for POST /auth/student-login (tokens or NEW_PASSWORD_REQUIRED challenge)."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
-    # TODO(#11): decide on discriminated-union vs separate endpoints;
-    #            for now id_token is None when a challenge is returned.
     id_token: str | None = None
     refresh_token: str | None = None
     expires_in: int | None = None
@@ -185,9 +182,6 @@ def get_change_password_use_case() -> ChangeStudentPasswordUseCase:
     return ChangeStudentPasswordUseCase(auth_service=_build_auth_adapter())
 
 
-# TODO(#11): implement — call LoginStudentUseCase; if result.challenge is set,
-#            return StudentLoginResponse with challenge_name + session;
-#            otherwise return StudentLoginResponse with id_token + refresh_token + expires_in.
 @router.post(
     "/student-login",
     response_model=StudentLoginResponse,
@@ -197,12 +191,32 @@ async def student_login(
     body: LoginRequest,
     use_case: Annotated[LoginStudentUseCase, Depends(get_login_student_use_case)],
 ) -> StudentLoginResponse:
-    # TODO(#11): implement handler body
-    raise NotImplementedError
+    try:
+        result = await use_case.execute(
+            LoginStudentCommand(email=body.email, password=body.password)
+        )
+    except InvalidCredentialsError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(err) or "Invalid email or password.",
+        ) from err
+
+    if result.challenge is not None:
+        return StudentLoginResponse(
+            challenge_name=result.challenge.challenge_name,
+            session=result.challenge.session,
+        )
+
+    tokens = result.tokens
+    if tokens is None:
+        raise RuntimeError("Login outcome missing tokens despite absent challenge.")
+    return StudentLoginResponse(
+        id_token=tokens.id_token,
+        refresh_token=tokens.refresh_token,
+        expires_in=tokens.expires_in,
+    )
 
 
-# TODO(#11): implement — call ChangeStudentPasswordUseCase;
-#            on WeakPasswordError → 400, InvalidCredentialsError → 401.
 @router.post(
     "/change-password",
     response_model=ChangePasswordResponse,
@@ -212,8 +226,30 @@ async def change_password(
     body: ChangePasswordRequest,
     use_case: Annotated[ChangeStudentPasswordUseCase, Depends(get_change_password_use_case)],
 ) -> ChangePasswordResponse:
-    # TODO(#11): implement handler body
-    raise NotImplementedError
+    try:
+        result = await use_case.execute(
+            ChangeStudentPasswordCommand(
+                email=body.email,
+                session=body.session,
+                new_password=body.new_password,
+            )
+        )
+    except InvalidCredentialsError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(err) or "Invalid email or session.",
+        ) from err
+    except WeakPasswordError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(err) or "Password does not meet the required policy.",
+        ) from err
+
+    return ChangePasswordResponse(
+        id_token=result.tokens.id_token,
+        refresh_token=result.tokens.refresh_token,
+        expires_in=result.tokens.expires_in,
+    )
 
 
 def _build_auth_adapter() -> CognitoAuthAdapter:

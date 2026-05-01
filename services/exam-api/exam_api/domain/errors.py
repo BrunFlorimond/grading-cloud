@@ -40,15 +40,13 @@ class StudentExamScopeConflictError(InviteError):
     """Raised when an existing student account is bound to another exam scope."""
 
 
-# TODO(#11): add StudentAuthError subtypes if needed (e.g. ChallengeExpiredError)
 class StudentAuthError(Exception):
     """Base class for student authentication errors."""
 
 
 class PasswordChallengeRequiredError(StudentAuthError):
-    """Raised when Cognito requires a NEW_PASSWORD_REQUIRED challenge on login."""
+    """Reserved for flows that signal password challenge via exceptions instead of result models."""
 
     def __init__(self, session: str) -> None:
         super().__init__("Password change required.")
-        # TODO(#11): decide whether to keep session here or in the result model
         self.session = session

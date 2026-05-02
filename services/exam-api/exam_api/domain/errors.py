@@ -111,6 +111,12 @@ class StudentBatchTooLargeError(StudentEnrollmentError):
 class EnrollmentExamNotFoundError(StudentEnrollmentError):
     """Raised when the target exam does not exist during enrollment."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
 
 class EnrollmentExamOwnershipError(StudentEnrollmentError):
     """Raised when the requesting teacher does not own the exam."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)

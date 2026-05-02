@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from grading_shared.domain.models import StrictModel
-from pydantic import EmailStr
+from pydantic import EmailStr, Field, field_validator
 
 from exam_api.domain.errors import DuplicateStudentError, StudentBatchTooLargeError
 from exam_api.domain.student import EnrolledStudent, SubmissionStatus
@@ -17,11 +17,21 @@ _MAX_BATCH_SIZE = 50
 class StudentInput(StrictModel):
     """Single student payload within a batch-add request."""
 
-    student_id: str | None = None
+    student_id: str | None = Field(default=None, min_length=1)
     nom: str
     prenom: str
     classe: str
     email: EmailStr | None = None
+
+    @field_validator("student_id", mode="before")
+    @classmethod
+    def _normalize_student_id(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            return stripped if stripped else None
+        return v
 
 
 class AddStudentsCommand(StrictModel):
@@ -63,7 +73,11 @@ class AddStudentsUseCase:
     ) -> list[EnrolledStudent]:
         out: list[EnrolledStudent] = []
         for s in students:
-            sid = s.student_id if s.student_id is not None else str(uuid.uuid4())
+            raw_id = s.student_id
+            if raw_id is None or not str(raw_id).strip():
+                sid = str(uuid.uuid4())
+            else:
+                sid = str(raw_id).strip()
             out.append(
                 EnrolledStudent(
                     student_id=sid,

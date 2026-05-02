@@ -11,14 +11,14 @@ from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 from jose import JWTError
 
-from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.api.http_error_handlers import register_http_error_handlers
-from exam_api.api.invite_router import (
+from exam_api.api.dependencies import (
+    CurrentTeacher,
     get_verify_exam_ownership_use_case,
-    provide_invite_use_case,
-    router,
+    require_teacher,
     verify_teacher_exam_ownership,
 )
+from exam_api.api.http_error_handlers import register_http_error_handlers
+from exam_api.api.invite_router import provide_invite_use_case, router
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentResult,

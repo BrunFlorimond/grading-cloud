@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.api.invite_router import (
-    get_exam_ownership_repository,
+from exam_api.api.dependencies import (
+    CurrentTeacher,
+    require_teacher,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.add_students import (
@@ -23,12 +23,9 @@ from exam_api.application.list_exam_students import (
 )
 from exam_api.domain.errors import (
     DuplicateStudentError,
-    EnrollmentExamNotFoundError,
-    EnrollmentExamOwnershipError,
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
-from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
 
 router = APIRouter(prefix="/exams", tags=["students"])
@@ -42,11 +39,21 @@ router = APIRouter(prefix="/exams", tags=["students"])
 class StudentInputSchema(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    student_id: str | None = None
+    student_id: str | None = Field(default=None, min_length=1)
     nom: str = Field(..., min_length=1)
     prenom: str = Field(..., min_length=1)
     classe: str = Field(..., min_length=1)
     email: EmailStr | None = None
+
+    @field_validator("student_id", mode="before")
+    @classmethod
+    def _normalize_student_id(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            return stripped if stripped else None
+        return v
 
 
 class EnrolledStudentSchema(BaseModel):
@@ -99,14 +106,8 @@ def provide_list_students_use_case(
     repository: Annotated[
         StudentEnrollmentRepositoryPort, Depends(get_enrollment_repository)
     ],
-    exam_ownership: Annotated[
-        ExamOwnershipPort, Depends(get_exam_ownership_repository)
-    ],
 ) -> ListExamStudentsUseCase:
-    return ListExamStudentsUseCase(
-        enrollment_repository=repository,
-        exam_ownership_port=exam_ownership,
-    )
+    return ListExamStudentsUseCase(enrollment_repository=repository)
 
 
 # ---------------------------------------------------------------------------
@@ -195,19 +196,6 @@ async def list_students(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(err),
-        ) from err
-    except EnrollmentExamNotFoundError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(err),
-        ) from err
-    except EnrollmentExamOwnershipError as err:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": str(err),
-                "code": "exam_ownership",
-            },
         ) from err
 
     return ListStudentsResponse(

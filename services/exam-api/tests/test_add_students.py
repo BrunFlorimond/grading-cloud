@@ -25,8 +25,8 @@ from exam_api.application.list_exam_students import (
 )
 from exam_api.domain.errors import (
     DuplicateStudentError,
-    EnrollmentExamNotFoundError,
     ExamNotFoundError,
+    ExamOwnershipError,
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
@@ -275,13 +275,8 @@ async def test_list_exam_students_delegates_to_repository() -> None:
     page = EnrolledStudentPage(items=[], next_cursor=None)
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     enrollment.list_exam_students = AsyncMock(return_value=page)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
 
-    use_case = ListExamStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = ListExamStudentsUseCase(enrollment_repository=enrollment)
     await use_case.execute(
         ListExamStudentsCommand(
             exam_id="e1",
@@ -291,10 +286,6 @@ async def test_list_exam_students_delegates_to_repository() -> None:
         )
     )
 
-    ownership.verify_teacher_owns_exam.assert_awaited_once_with(
-        teacher_id="t1",
-        exam_id="e1",
-    )
     enrollment.list_exam_students.assert_awaited_once_with(
         exam_id="e1",
         limit=20,
@@ -307,13 +298,8 @@ async def test_list_exam_students_returns_page_from_repository() -> None:
     page = EnrolledStudentPage(items=[], next_cursor="next")
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     enrollment.list_exam_students = AsyncMock(return_value=page)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
 
-    use_case = ListExamStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = ListExamStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
         ListExamStudentsCommand(
             exam_id="e1",
@@ -324,29 +310,6 @@ async def test_list_exam_students_returns_page_from_repository() -> None:
     )
 
     assert result is page
-
-
-@pytest.mark.asyncio
-async def test_list_exam_students_raises_enrollment_exam_not_found() -> None:
-    enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock(
-        side_effect=ExamNotFoundError("missing"),
-    )
-    use_case = ListExamStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
-
-    with pytest.raises(EnrollmentExamNotFoundError):
-        await use_case.execute(
-            ListExamStudentsCommand(
-                exam_id="e1",
-                teacher_id="t1",
-                limit=20,
-                cursor=None,
-            )
-        )
 
 
 # --- student_router (TestClient) ---
@@ -506,6 +469,43 @@ def test_post_students_exam_not_found_returns_404(students_api_client: TestClien
     )
 
     assert response.status_code == 404
+
+
+def test_get_students_ownership_failure_returns_403(
+    students_api_client: TestClient,
+) -> None:
+    ownership = students_api_client.app.state.exam_ownership_repository
+    ownership.verify_teacher_owns_exam = AsyncMock(
+        side_effect=ExamOwnershipError("Teacher does not own this exam."),
+    )
+
+    response = students_api_client.get(
+        "/exams/exam-99/students",
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "exam_ownership"
+
+
+def test_post_students_blank_student_id_assigns_uuid(
+    students_api_client: TestClient,
+) -> None:
+    response = students_api_client.post(
+        "/exams/exam-99/students",
+        json=[
+            {
+                "student_id": "",
+                "nom": "Doe",
+                "prenom": "Jane",
+                "classe": "A",
+            }
+        ],
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 201
+    assert _uuid4_string(response.json()["created"][0]["student_id"])
 
 
 def test_get_students_requires_auth() -> None:

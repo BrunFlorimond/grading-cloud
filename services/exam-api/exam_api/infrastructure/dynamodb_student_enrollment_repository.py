@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import os
 from typing import Any, Awaitable, Callable, TypeVar
 
@@ -20,6 +21,8 @@ T = TypeVar("T")
 
 _TRANSACT_MAX_ITEMS = 25
 _SK_PREFIX = "STUDENT#"
+
+logger = logging.getLogger(__name__)
 
 
 def _encode_lek(key: dict[str, Any]) -> str:
@@ -157,7 +160,14 @@ class DynamoDbStudentEnrollmentRepository:
                                     client, exam_id, committed_ids
                                 )
                             except ClientError:
-                                pass
+                                logger.warning(
+                                    "Enrollment compensation delete failed after "
+                                    "duplicate student conflict; partial rows may remain "
+                                    "for exam_id=%r pending_ids=%r",
+                                    exam_id,
+                                    committed_ids,
+                                    exc_info=True,
+                                )
                             committed_ids = []
                         raise DuplicateStudentError(fail_sid, exam_id) from err
                     raise
@@ -244,10 +254,21 @@ class DynamoDbStudentEnrollmentRepository:
     @staticmethod
     def _student_from_flat(flat: dict[str, Any], exam_id: str) -> EnrolledStudent | None:
         sk = flat.get("SK")
+        sk_display = sk if isinstance(sk, str) else repr(sk)
         if not isinstance(sk, str) or not sk.startswith(_SK_PREFIX):
+            logger.warning(
+                "Skipping DynamoDB row with unexpected SK for exam_id=%r: %s",
+                exam_id,
+                sk_display,
+            )
             return None
         student_id = sk[len(_SK_PREFIX) :]
         if not student_id:
+            logger.warning(
+                "Skipping DynamoDB row with empty student id in SK for exam_id=%r: %s",
+                exam_id,
+                sk_display,
+            )
             return None
         raw_sid = flat.get("student_id")
         if isinstance(raw_sid, str) and raw_sid:
@@ -259,6 +280,12 @@ class DynamoDbStudentEnrollmentRepository:
         if not isinstance(nom, str) or not isinstance(prenom, str) or not isinstance(
             classe, str
         ):
+            logger.warning(
+                "Skipping corrupt enrollment row (missing nom/prenom/classe) "
+                "for exam_id=%r SK=%s",
+                exam_id,
+                sk_display,
+            )
             return None
 
         raw_status = flat.get("submission_status", SubmissionStatus.PENDING.value)

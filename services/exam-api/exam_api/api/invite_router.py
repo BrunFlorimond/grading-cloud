@@ -12,21 +12,17 @@ from exam_api.api.dependencies import (
     CurrentTeacher,
     require_own_data,
     require_teacher,
+    verify_teacher_exam_ownership,
 )
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentUseCase,
-)
-from exam_api.application.verify_exam_ownership import (
-    VerifyExamOwnershipCommand,
-    VerifyExamOwnershipUseCase,
 )
 from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
     StudentExamScopeConflictError,
 )
-from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
@@ -74,15 +70,6 @@ def get_invite_repository(request: Request) -> ExamRepositoryPort:
     return repository
 
 
-def get_exam_ownership_repository(request: Request) -> ExamOwnershipPort:
-    repository = getattr(request.app.state, "exam_ownership_repository", None)
-    if not isinstance(repository, ExamOwnershipPort):
-        raise RuntimeError(
-            "Missing exam ownership configuration. Set app.state.exam_ownership_repository."
-        )
-    return repository
-
-
 def get_student_scope_repository(
     repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
 ) -> StudentScopeRepositoryPort:
@@ -91,46 +78,6 @@ def get_student_scope_repository(
             "Invite repository must implement student scope persistence methods."
         )
     return repository
-
-
-def get_verify_exam_ownership_use_case(
-    exam_ownership_repository: Annotated[
-        ExamOwnershipPort,
-        Depends(get_exam_ownership_repository),
-    ],
-) -> VerifyExamOwnershipUseCase:
-    return VerifyExamOwnershipUseCase(exam_ownership_repository)
-
-
-async def verify_teacher_exam_ownership(
-    exam_id: str,
-    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    use_case: Annotated[
-        VerifyExamOwnershipUseCase,
-        Depends(get_verify_exam_ownership_use_case),
-    ],
-) -> None:
-    """Ensures exam METADATA exists and the TEACHER#/EXAM# edge matches this teacher."""
-    try:
-        await use_case.execute(
-            VerifyExamOwnershipCommand(
-                teacher_id=current_teacher.teacher_id,
-                exam_id=exam_id,
-            )
-        )
-    except ExamNotFoundError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(err),
-        ) from err
-    except ExamOwnershipError as err:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": str(err),
-                "code": "exam_ownership",
-            },
-        ) from err
 
 
 def provide_invite_use_case(

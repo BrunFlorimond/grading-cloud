@@ -15,6 +15,7 @@ class StorageStack(Stack):
             self,
             "FilesBucket",
             versioned=True,
+            enforce_ssl=True,
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             auto_delete_objects=False,
@@ -29,6 +30,8 @@ class StorageStack(Stack):
             ],
         )
 
+        # Fixed physical name for single-table lookups across stacks; override via CDK
+        # context or separate stacks when multi-env tables are needed in one account.
         self.grading_table = dynamodb.Table(
             self,
             "GradingTable",
@@ -60,6 +63,8 @@ class StorageStack(Stack):
             ),
         )
 
+        # TeacherExams: application stores TEACHER#{id} in GSI2PK and timestamps / SK
+        # values (e.g. ISO 8601 created_at) in GSI2SK — generic single-table names.
         self.grading_table.add_global_secondary_index(
             index_name="TeacherExams",
             partition_key=dynamodb.Attribute(

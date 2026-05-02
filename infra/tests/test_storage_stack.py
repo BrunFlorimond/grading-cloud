@@ -142,6 +142,8 @@ def test_dynamodb_gsi_batch_index(storage_template: Template) -> None:
 
 
 def test_dynamodb_gsi_teacher_exams(storage_template: Template) -> None:
+    # Domain maps listing sort values (e.g. created_at) onto GSI2SK — attribute name
+    # stays generic per single-table pattern (issue acceptance criterion SK semantics).
     storage_template.has_resource_properties(
         "AWS::DynamoDB::Table",
         {

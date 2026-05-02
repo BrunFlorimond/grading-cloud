@@ -93,7 +93,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ -d "tests" ] || [ -n "$(ls -1 shared/tests services/*/tests infra/tests 2>/dev/null || true)" ]; then
-            (cd services/exam-api && uv run pytest tests/)
+            if [ -d "tests" ]; then
+              uv run pytest tests/
+            fi
+            if [ -d "shared/tests" ]; then
+              (cd shared && uv run pytest tests/)
+            fi
+            for svc in services/*/; do
+              if [ -d "${svc}tests" ]; then
+                (cd "$svc" && uv run pytest tests/)
+              fi
+            done
             (cd infra && uv run pytest tests/)
           else
             echo "No tests found yet. Skipping execution."

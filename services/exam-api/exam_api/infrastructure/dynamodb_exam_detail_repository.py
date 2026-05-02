@@ -161,21 +161,42 @@ class DynamoDbExamDetailRepository:
             created_at=created_at,
             pipeline_started_at=pipeline_started_at,
             pipeline_completed_at=pipeline_completed_at,
-            status_counts=StatusCounts(pending=0),
+            status_counts=StatusCounts(
+                pending=0,
+                converted=0,
+                corrected=0,
+                other=0,
+            ),
         )
 
     @staticmethod
-    def _count_pending_from_student_items(items: list[dict[str, Any]]) -> int:
+    def _status_counts_from_student_items(items: list[dict[str, Any]]) -> StatusCounts:
         pending = 0
+        converted = 0
+        corrected = 0
+        other = 0
         for item in items:
             flat = deserialize_item(item)
             sk = flat.get("SK")
             if not isinstance(sk, str) or not sk.startswith(_SK_PREFIX):
                 continue
             raw = flat.get("submission_status", SubmissionStatus.PENDING.value)
-            if isinstance(raw, str) and raw == SubmissionStatus.PENDING.value:
+            if not isinstance(raw, str):
+                raw = SubmissionStatus.PENDING.value
+            if raw == SubmissionStatus.PENDING.value:
                 pending += 1
-        return pending
+            elif raw == SubmissionStatus.CONVERTED.value:
+                converted += 1
+            elif raw == SubmissionStatus.CORRECTED.value:
+                corrected += 1
+            else:
+                other += 1
+        return StatusCounts(
+            pending=pending,
+            converted=converted,
+            corrected=corrected,
+            other=other,
+        )
 
     async def get_exam_detail(self, *, exam_id: str) -> ExamDetail:
         async def _run(client: Any) -> ExamDetail:
@@ -196,10 +217,8 @@ class DynamoDbExamDetailRepository:
             if detail is None:
                 raise ExamNotFoundError(f"Exam {exam_id!r} not found.")
 
-            pending = self._count_pending_from_student_items(raw_items)
-            return detail.model_copy(
-                update={"status_counts": StatusCounts(pending=pending)},
-            )
+            counts = self._status_counts_from_student_items(raw_items)
+            return detail.model_copy(update={"status_counts": counts})
 
         try:
             return await self._use_client(_run)

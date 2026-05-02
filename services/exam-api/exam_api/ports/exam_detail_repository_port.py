@@ -11,6 +11,9 @@ class StatusCounts(StrictModel):
     """Counts of students grouped by submission_status."""
 
     pending: int
+    converted: int
+    corrected: int
+    other: int
 
 
 class ExamDetail(StrictModel):

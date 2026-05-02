@@ -21,7 +21,11 @@ from exam_api.application.verify_exam_ownership import (
     VerifyExamOwnershipCommand,
     VerifyExamOwnershipUseCase,
 )
-from exam_api.domain.errors import ExamNotFoundError, ExamOwnershipError
+from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
+    ExamNotFoundError,
+    ExamOwnershipError,
+)
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
@@ -236,9 +240,6 @@ async def verify_teacher_exam_ownership(
         ) from err
     except ExamOwnershipError as err:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": str(err),
-                "code": "exam_ownership",
-            },
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=EXAM_NOT_FOUND_FOR_CLIENT,
         ) from err

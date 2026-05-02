@@ -28,6 +28,10 @@ class ExamNotFoundError(InviteError):
     """Raised when the target exam does not exist."""
 
 
+# Returned as HTTP 404 detail when the caller must not learn whether an exam exists.
+EXAM_NOT_FOUND_FOR_CLIENT = "Exam not found."
+
+
 class ExamOwnershipError(InviteError):
     """Raised when the requesting teacher does not own the exam."""
 

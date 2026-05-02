@@ -23,6 +23,7 @@ from exam_api.application.list_exam_student_statuses import (
     ListExamStudentStatusesUseCase,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     ExamNotFoundError,
     ExamOwnershipError,
     InvalidExamListCursorError,
@@ -57,7 +58,12 @@ async def test_get_exam_detail_returns_metadata_and_status_counts() -> None:
         teacher_id="t1",
         title="Final",
         status="created",
-        status_counts=StatusCounts(pending=3),
+        status_counts=StatusCounts(
+            pending=3,
+            converted=0,
+            corrected=0,
+            other=0,
+        ),
     )
     repo = Mock(spec=ExamDetailRepositoryPort)
     repo.get_exam_detail = AsyncMock(return_value=detail)
@@ -426,7 +432,12 @@ def exam_detail_api_client() -> TestClient:
             created_at="2026-05-01T12:00:00Z",
             pipeline_started_at=None,
             pipeline_completed_at=None,
-            status_counts=StatusCounts(pending=1),
+            status_counts=StatusCounts(
+                pending=1,
+                converted=2,
+                corrected=0,
+                other=1,
+            ),
         ),
     )
     app.state.exam_detail_repository = detail_repo
@@ -468,6 +479,9 @@ def test_get_exam_detail_endpoint_returns_200(
     assert body["subject"] == "Phy"
     assert body["created_at"] == "2026-05-01T12:00:00Z"
     assert body["status_counts"]["pending"] == 1
+    assert body["status_counts"]["converted"] == 2
+    assert body["status_counts"]["corrected"] == 0
+    assert body["status_counts"]["other"] == 1
 
 
 def test_get_exam_detail_endpoint_returns_404_when_not_found(
@@ -499,7 +513,7 @@ def test_get_exam_detail_endpoint_requires_teacher_auth() -> None:
     assert response.status_code == 401
 
 
-def test_get_exam_detail_endpoint_returns_403_when_not_owner(
+def test_get_exam_detail_endpoint_returns_404_when_not_owner(
     exam_detail_api_client: TestClient,
 ) -> None:
     ownership = exam_detail_api_client.app.state.exam_ownership_repository
@@ -512,8 +526,8 @@ def test_get_exam_detail_endpoint_returns_403_when_not_owner(
         headers={"Authorization": "Bearer fake"},
     )
 
-    assert response.status_code == 403
-    assert response.json()["code"] == "exam_ownership"
+    assert response.status_code == 404
+    assert response.json()["detail"] == EXAM_NOT_FOUND_FOR_CLIENT
 
 
 # --- student_router GET /exams/{exam_id}/students ---

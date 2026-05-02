@@ -25,6 +25,7 @@ from exam_api.application.invite_student import (
     InviteStudentUseCase,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     ExamNotFoundError,
     ExamOwnershipError,
     StudentExamScopeConflictError,
@@ -472,7 +473,7 @@ def test_api_returns_404_when_exam_not_found_at_ownership_verify(
     mock_invite_uc.execute.assert_not_called()
 
 
-def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> None:
+def test_api_returns_404_when_teacher_does_not_own_exam(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock(side_effect=ExamOwnershipError("forbidden"))
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
@@ -485,9 +486,8 @@ def test_api_returns_403_when_teacher_does_not_own_exam(client: TestClient) -> N
         json={"student_email": "student@example.com"},
     )
 
-    assert response.status_code == 403
-    assert response.json()["error"] == "forbidden"
-    assert response.json()["code"] == "exam_ownership"
+    assert response.status_code == 404
+    assert response.json()["detail"] == EXAM_NOT_FOUND_FOR_CLIENT
 
 
 def test_api_returns_409_on_student_exam_scope_conflict(client: TestClient) -> None:

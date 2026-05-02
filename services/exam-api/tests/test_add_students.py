@@ -24,6 +24,7 @@ from exam_api.application.list_exam_students import (
     ListExamStudentsUseCase,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     DuplicateStudentError,
     ExamNotFoundError,
     ExamOwnershipError,
@@ -480,7 +481,7 @@ def test_post_students_exam_not_found_returns_404(
     assert response.status_code == 404
 
 
-def test_get_students_ownership_failure_returns_403(
+def test_get_students_ownership_failure_returns_404(
     students_api_client: TestClient,
 ) -> None:
     ownership = students_api_client.app.state.exam_ownership_repository
@@ -493,8 +494,8 @@ def test_get_students_ownership_failure_returns_403(
         headers={"Authorization": "Bearer fake"},
     )
 
-    assert response.status_code == 403
-    assert response.json()["code"] == "exam_ownership"
+    assert response.status_code == 404
+    assert response.json()["detail"] == EXAM_NOT_FOUND_FOR_CLIENT
 
 
 def test_post_students_blank_student_id_assigns_uuid(

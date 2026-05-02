@@ -77,6 +77,9 @@ class StatusCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     pending: int
+    converted: int
+    corrected: int
+    other: int
 
 
 class ExamDetailResponse(BaseModel):
@@ -230,5 +233,10 @@ async def get_exam_detail(
         created_at=detail.created_at,
         pipeline_started_at=detail.pipeline_started_at,
         pipeline_completed_at=detail.pipeline_completed_at,
-        status_counts=StatusCountsResponse(pending=detail.status_counts.pending),
+        status_counts=StatusCountsResponse(
+            pending=detail.status_counts.pending,
+            converted=detail.status_counts.converted,
+            corrected=detail.status_counts.corrected,
+            other=detail.status_counts.other,
+        ),
     )

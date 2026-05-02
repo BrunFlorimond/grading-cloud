@@ -1,17 +1,15 @@
 """CDK assertions for AuthStack (issue #6).
 
-All tests below are stubs — implement using aws_cdk.assertions.Template.
 Run with: uv run pytest tests/test_auth_stack.py
+(from the infra/ directory)
 """
 
 from __future__ import annotations
 
+import aws_cdk as cdk
 import pytest
-
-# TODO(#6): uncomment once aws-cdk-lib[testing] / pytest are in pyproject.toml
-# import aws_cdk as cdk
-# from aws_cdk import assertions
-# from stacks.auth_stack import AuthStack
+from aws_cdk import assertions
+from stacks.auth_stack import AuthStack
 
 
 # ---------------------------------------------------------------------------
@@ -20,9 +18,10 @@ import pytest
 
 
 @pytest.fixture()
-def template():
-    # TODO(#6): synthesise AuthStack and return assertions.Template.from_stack(stack)
-    pytest.skip("stub — not yet implemented")
+def template() -> assertions.Template:
+    app = cdk.App()
+    stack = AuthStack(app, "TestAuthStack")
+    return assertions.Template.from_stack(stack)
 
 
 # ---------------------------------------------------------------------------
@@ -30,24 +29,59 @@ def template():
 # ---------------------------------------------------------------------------
 
 
-def test_user_pool_email_sign_in(template):
-    # TODO(#6): assert UsernameAttributes contains EMAIL
-    pytest.skip("stub — not yet implemented")
+def test_user_pool_email_sign_in(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPool",
+        {"UsernameAttributes": ["email"]},
+    )
 
 
-def test_user_pool_self_signup_disabled(template):
-    # TODO(#6): assert AdminCreateUserConfig.AllowAdminCreateUserOnly == True
-    pytest.skip("stub — not yet implemented")
+def test_user_pool_self_signup_disabled(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPool",
+        {"AdminCreateUserConfig": {"AllowAdminCreateUserOnly": True}},
+    )
 
 
-def test_user_pool_password_policy(template):
-    # TODO(#6): assert PasswordPolicy min_length=8, require_uppercase, lowercase, digits
-    pytest.skip("stub — not yet implemented")
+def test_user_pool_password_policy(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPool",
+        {
+            "Policies": {
+                "PasswordPolicy": {
+                    "MinimumLength": 8,
+                    "RequireUppercase": True,
+                    "RequireLowercase": True,
+                    "RequireNumbers": True,
+                    "RequireSymbols": False,
+                }
+            }
+        },
+    )
 
 
-def test_user_pool_custom_role_attribute(template):
-    # TODO(#6): assert Schema contains custom:role StringAttributeConstraints
-    pytest.skip("stub — not yet implemented")
+def test_user_pool_custom_role_attribute(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPool",
+        {
+            "Schema": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Name": "role",
+                            "AttributeDataType": "String",
+                            "StringAttributeConstraints": assertions.Match.object_like(
+                                {
+                                    "MinLength": "7",
+                                    "MaxLength": "7",
+                                }
+                            ),
+                        }
+                    )
+                ]
+            )
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -55,14 +89,18 @@ def test_user_pool_custom_role_attribute(template):
 # ---------------------------------------------------------------------------
 
 
-def test_teachers_group_exists(template):
-    # TODO(#6): assert CfnUserPoolGroup with GroupName=Teachers
-    pytest.skip("stub — not yet implemented")
+def test_teachers_group_exists(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPoolGroup",
+        {"GroupName": "Teachers"},
+    )
 
 
-def test_students_group_exists(template):
-    # TODO(#6): assert CfnUserPoolGroup with GroupName=Students
-    pytest.skip("stub — not yet implemented")
+def test_students_group_exists(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPoolGroup",
+        {"GroupName": "Students"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,14 +108,22 @@ def test_students_group_exists(template):
 # ---------------------------------------------------------------------------
 
 
-def test_app_client_no_secret(template):
-    # TODO(#6): assert UserPoolClient GenerateSecret == False (or absent)
-    pytest.skip("stub — not yet implemented")
+def test_app_client_no_secret(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPoolClient",
+        {"GenerateSecret": False},
+    )
 
 
-def test_app_client_supports_user_password_auth(template):
-    # TODO(#6): assert ExplicitAuthFlows contains ALLOW_USER_PASSWORD_AUTH
-    pytest.skip("stub — not yet implemented")
+def test_app_client_supports_user_password_auth(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPoolClient",
+        {
+            "ExplicitAuthFlows": assertions.Match.array_with(
+                ["ALLOW_USER_PASSWORD_AUTH"],
+            )
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,14 +131,26 @@ def test_app_client_supports_user_password_auth(template):
 # ---------------------------------------------------------------------------
 
 
-def test_http_api_protocol_http(template):
-    # TODO(#6): assert CfnApi ProtocolType == HTTP
-    pytest.skip("stub — not yet implemented")
+def test_http_api_protocol_http(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::ApiGatewayV2::Api",
+        {"ProtocolType": "HTTP"},
+    )
 
 
-def test_jwt_authorizer_uses_cognito_issuer(template):
-    # TODO(#6): assert CfnAuthorizer JwtConfiguration.Issuer matches user pool URL
-    pytest.skip("stub — not yet implemented")
+def test_jwt_authorizer_uses_cognito_issuer(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::ApiGatewayV2::Authorizer",
+        {
+            "AuthorizerType": "JWT",
+            "JwtConfiguration": assertions.Match.object_like(
+                {
+                    "Issuer": {"Fn::GetAtt": assertions.Match.any_value()},
+                    "Audience": assertions.Match.any_value(),
+                }
+            ),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -100,11 +158,15 @@ def test_jwt_authorizer_uses_cognito_issuer(template):
 # ---------------------------------------------------------------------------
 
 
-def test_ssm_user_pool_id_parameter(template):
-    # TODO(#6): assert StringParameter /grading/cognito/user-pool-id exists
-    pytest.skip("stub — not yet implemented")
+def test_ssm_user_pool_id_parameter(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::SSM::Parameter",
+        {"Name": "/grading/cognito/user-pool-id"},
+    )
 
 
-def test_ssm_app_client_id_parameter(template):
-    # TODO(#6): assert StringParameter /grading/cognito/app-client-id exists
-    pytest.skip("stub — not yet implemented")
+def test_ssm_app_client_id_parameter(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::SSM::Parameter",
+        {"Name": "/grading/cognito/app-client-id"},
+    )

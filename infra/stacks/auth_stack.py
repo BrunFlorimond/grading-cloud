@@ -1,9 +1,7 @@
 from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_apigatewayv2 as apigatewayv2
 from aws_cdk import aws_cognito as cognito
-
-# TODO(#6): import aws_ssm for SSM parameter exports
-# from aws_cdk import aws_ssm as ssm
+from aws_cdk import aws_ssm as ssm
 
 from constructs import Construct
 
@@ -28,15 +26,13 @@ class AuthStack(Stack):
                     mutable=True,
                 ),
             },
-            # TODO(#6): add password_policy with min_length=8, require_uppercase=True,
-            #           require_lowercase=True, require_digits=True, require_symbols=False
-            # password_policy=cognito.PasswordPolicy(
-            #     min_length=8,
-            #     require_uppercase=True,
-            #     require_lowercase=True,
-            #     require_digits=True,
-            #     require_symbols=False,
-            # ),
+            password_policy=cognito.PasswordPolicy(
+                min_length=8,
+                require_uppercase=True,
+                require_lowercase=True,
+                require_digits=True,
+                require_symbols=False,
+            ),
         )
 
         cognito.CfnUserPoolGroup(
@@ -128,20 +124,16 @@ class AuthStack(Stack):
             export_name="GradingHttpApiJwtAuthorizerId",
         )
 
-        # TODO(#6): export User Pool ID and App Client ID as SSM parameters
-        # so other stacks and services can resolve them at deploy time without
-        # hard-coded CloudFormation imports.
-        #
-        # ssm.StringParameter(
-        #     self,
-        #     "UserPoolIdParam",
-        #     parameter_name="/grading/cognito/user-pool-id",
-        #     string_value=user_pool.user_pool_id,
-        # )
-        #
-        # ssm.StringParameter(
-        #     self,
-        #     "AppClientIdParam",
-        #     parameter_name="/grading/cognito/app-client-id",
-        #     string_value=user_pool_client.user_pool_client_id,
-        # )
+        ssm.StringParameter(
+            self,
+            "UserPoolIdParam",
+            parameter_name="/grading/cognito/user-pool-id",
+            string_value=user_pool.user_pool_id,
+        )
+
+        ssm.StringParameter(
+            self,
+            "AppClientIdParam",
+            parameter_name="/grading/cognito/app-client-id",
+            string_value=user_pool_client.user_pool_client_id,
+        )

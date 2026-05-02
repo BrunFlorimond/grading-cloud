@@ -14,6 +14,7 @@ from exam_api.api.config_router import router as config_router
 from exam_api.api.exam_router import router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import router as invite_router
+from exam_api.api.student_router import router as student_router
 from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
 from exam_api.infrastructure.dynamodb_exam_creation_repository import (
     DynamoDbExamCreationRepository,
@@ -24,6 +25,9 @@ from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
 from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRepository
 from exam_api.infrastructure.dynamodb_exam_config_repository import (
     DynamoDbExamConfigRepository,
+)
+from exam_api.infrastructure.dynamodb_student_enrollment_repository import (
+    DynamoDbStudentEnrollmentRepository,
 )
 from exam_api.infrastructure.s3_exam_config_storage import S3ExamConfigStorage
 from exam_api.infrastructure.student_invite_adapter import (
@@ -60,6 +64,11 @@ async def _lifespan(app: FastAPI):
                 s3_client=s3_client,
             )
             app.state.exam_config_repository = DynamoDbExamConfigRepository(
+                table_name=table_name,
+                dynamodb_client=dynamodb_client,
+            )
+            # TODO(#15): wire student_enrollment_repository once DynamoDbStudentEnrollmentRepository is implemented
+            app.state.student_enrollment_repository = DynamoDbStudentEnrollmentRepository(
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,
             )
@@ -116,3 +125,4 @@ app.include_router(auth_router)
 app.include_router(invite_router)
 app.include_router(exam_router)
 app.include_router(config_router)
+app.include_router(student_router)

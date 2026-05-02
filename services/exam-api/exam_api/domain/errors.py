@@ -84,3 +84,30 @@ class ExamConfigInvalidJsonError(ExamConfigError):
 
 class ExamConfigWrongStatusError(ExamConfigError):
     """Raised when the exam status does not allow configuration uploads."""
+
+
+class StudentEnrollmentError(Exception):
+    """Base class for student enrollment errors."""
+
+
+class DuplicateStudentError(StudentEnrollmentError):
+    """Raised when a student_id already exists within the same exam."""
+
+    def __init__(self, student_id: str, exam_id: str) -> None:
+        self.student_id = student_id
+        self.exam_id = exam_id
+        super().__init__(f"Student {student_id!r} already enrolled in exam {exam_id!r}.")
+
+
+class StudentBatchTooLargeError(StudentEnrollmentError):
+    """Raised when the batch exceeds the maximum allowed size (50 students)."""
+
+    # TODO(#15): confirm whether 409 or 422 is the right status for this
+
+
+class EnrollmentExamNotFoundError(StudentEnrollmentError):
+    """Raised when the target exam does not exist during enrollment."""
+
+
+class EnrollmentExamOwnershipError(StudentEnrollmentError):
+    """Raised when the requesting teacher does not own the exam."""

@@ -8,10 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.api.invite_router import (
-    get_exam_ownership_repository,
-    verify_teacher_exam_ownership,
-)
+from exam_api.api.invite_router import get_exam_ownership_repository
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,
     ConfirmExamConfigUseCase,
@@ -19,6 +16,7 @@ from exam_api.application.confirm_exam_config import (
 from exam_api.application.get_exam_config_upload_urls import (
     GetExamConfigUploadUrlsCommand,
     GetExamConfigUploadUrlsUseCase,
+    PresignedPostBundle,
 )
 from exam_api.domain.errors import (
     ExamConfigInvalidJsonError,
@@ -37,7 +35,7 @@ router = APIRouter(prefix="/exams", tags=["config"])
 class UploadUrlsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    upload_urls: dict[str, str]  # filename → presigned PUT URL
+    upload_urls: dict[str, PresignedPostBundle]
 
 
 class ConfirmConfigResponse(BaseModel):
@@ -95,7 +93,6 @@ def provide_confirm_config_use_case(
 async def get_config_upload_urls(
     exam_id: str,
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    _: Annotated[None, Depends(verify_teacher_exam_ownership)],
     use_case: Annotated[
         GetExamConfigUploadUrlsUseCase, Depends(provide_get_upload_urls_use_case)
     ],
@@ -128,7 +125,6 @@ async def get_config_upload_urls(
 async def confirm_config(
     exam_id: str,
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    _: Annotated[None, Depends(verify_teacher_exam_ownership)],
     use_case: Annotated[ConfirmExamConfigUseCase, Depends(provide_confirm_config_use_case)],
 ) -> ConfirmConfigResponse:
     try:

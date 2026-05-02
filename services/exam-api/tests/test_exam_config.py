@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
@@ -19,6 +20,7 @@ from exam_api.application.confirm_exam_config import (
 from exam_api.application.get_exam_config_upload_urls import (
     GetExamConfigUploadUrlsCommand,
     GetExamConfigUploadUrlsUseCase,
+    PresignedPostBundle,
 )
 from exam_api.domain.errors import (
     ExamConfigInvalidJsonError,
@@ -33,16 +35,37 @@ from exam_api.ports.exam_config_storage_port import CONFIG_FILES
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 
+def _mock_presigned_posts(exam_id: str = "e1") -> dict[str, dict[str, Any]]:
+    return {
+        name: {
+            "url": f"https://bucket.example/post/{name}",
+            "fields": {
+                "key": f"exams/{exam_id}/config/{name}",
+                "policy": "policy",
+            },
+        }
+        for name in CONFIG_FILES
+    }
+
+
+def _config_object_key(*, exam_id: str, filename: str) -> str:
+    return f"exams/{exam_id}/config/{filename}"
+
+
+def _attach_confirm_storage_keys(storage: Mock) -> None:
+    storage.config_object_key = _config_object_key
+
+
 # --- GetExamConfigUploadUrlsUseCase ---
 
 
 @pytest.mark.asyncio
 async def test_get_upload_urls_returns_presigned_urls_for_all_four_files() -> None:
-    urls = {name: f"https://s3.example/{name}" for name in CONFIG_FILES}
+    raw = _mock_presigned_posts("e1")
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
-    storage.generate_upload_urls = AsyncMock(return_value=urls)
+    storage.generate_upload_urls = AsyncMock(return_value=raw)
 
     use_case = GetExamConfigUploadUrlsUseCase(
         exam_ownership=ownership,
@@ -52,7 +75,14 @@ async def test_get_upload_urls_returns_presigned_urls_for_all_four_files() -> No
         GetExamConfigUploadUrlsCommand(teacher_id="t1", exam_id="e1")
     )
 
-    assert result.upload_urls == urls
+    expected = {
+        fname: PresignedPostBundle(
+            url=data["url"],
+            fields={str(k): str(v) for k, v in data["fields"].items()},
+        )
+        for fname, data in raw.items()
+    }
+    assert result.upload_urls == expected
     storage.generate_upload_urls.assert_awaited_once_with(exam_id="e1")
 
 
@@ -137,11 +167,12 @@ async def test_confirm_config_returns_configured_status_when_all_files_present()
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(return_value=_sample_exam())
@@ -259,6 +290,7 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_devoir() -
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
@@ -292,6 +324,7 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_correction
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
@@ -325,6 +358,7 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_grille_not
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
@@ -358,11 +392,12 @@ async def test_confirm_config_saves_config_s3_keys_to_repository() -> None:
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(return_value=_sample_exam())
@@ -384,11 +419,12 @@ async def test_confirm_config_overwrites_previous_keys_on_re_upload() -> None:
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
+    _attach_confirm_storage_keys(storage)
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(
@@ -430,9 +466,11 @@ async def test_confirm_config_raises_wrong_status_when_exam_ready() -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_upload_urls_calls_presigned_url_for_each_of_four_config_files() -> None:
+async def test_generate_upload_urls_calls_presigned_post_for_each_of_four_config_files() -> None:
     client = AsyncMock()
-    client.generate_presigned_url = AsyncMock(side_effect=lambda *a, **k: "url")
+    client.generate_presigned_post = AsyncMock(
+        return_value={"url": "https://u", "fields": {"key": "k"}}
+    )
 
     storage = S3ExamConfigStorage(
         bucket_name="cfg-bucket",
@@ -440,33 +478,36 @@ async def test_generate_upload_urls_calls_presigned_url_for_each_of_four_config_
     )
     await storage.generate_upload_urls(exam_id="ex1")
 
-    assert client.generate_presigned_url.await_count == len(CONFIG_FILES)
+    assert client.generate_presigned_post.await_count == len(CONFIG_FILES)
 
 
 @pytest.mark.asyncio
 async def test_generate_upload_urls_sets_expiry_to_900_seconds() -> None:
     client = AsyncMock()
-    client.generate_presigned_url = AsyncMock(return_value="https://u")
+    client.generate_presigned_post = AsyncMock(
+        return_value={"url": "https://u", "fields": {}}
+    )
 
     storage = S3ExamConfigStorage(bucket_name="b", s3_client=client)
     await storage.generate_upload_urls(exam_id="ex1")
 
-    assert client.generate_presigned_url.await_args.kwargs["ExpiresIn"] == 900
+    assert client.generate_presigned_post.await_args.kwargs["ExpiresIn"] == 900
 
 
 @pytest.mark.asyncio
-async def test_generate_upload_urls_uses_correct_s3_prefix() -> None:
+async def test_generate_upload_urls_uses_correct_s3_prefix_and_size_policy() -> None:
     client = AsyncMock()
-    client.generate_presigned_url = AsyncMock(return_value="https://u")
+    client.generate_presigned_post = AsyncMock(
+        return_value={"url": "https://u", "fields": {}}
+    )
 
     storage = S3ExamConfigStorage(bucket_name="my-bucket", s3_client=client)
     await storage.generate_upload_urls(exam_id="ex-uuid")
 
-    keys = [
-        call.kwargs["Params"]["Key"]
-        for call in client.generate_presigned_url.await_args_list
-    ]
+    keys = [call.args[1] for call in client.generate_presigned_post.await_args_list]
     assert "exams/ex-uuid/config/devoir.json" in keys
+    conds = client.generate_presigned_post.await_args.kwargs["Conditions"]
+    assert ["content-length-range", 0, 10 * 1024 * 1024] in conds
 
 
 @pytest.mark.asyncio
@@ -592,7 +633,7 @@ async def test_save_exam_config_updates_dynamodb_metadata_with_s3_keys_and_confi
     meta_update = items[0]["Update"]
     assert "config_s3_keys" in meta_update["UpdateExpression"]
     assert ExamStatus.CONFIGURED.value in str(
-        meta_update["ExpressionAttributeValues"][":configured"]
+        meta_update["ExpressionAttributeValues"][":new_status"]
     )
 
 
@@ -620,8 +661,11 @@ async def test_save_exam_config_uses_conditional_expression_to_prevent_phantom_w
     )
 
     items = client.transact_write_items.await_args.kwargs["TransactItems"]
+    expected = (
+        "attribute_exists(PK) AND #st IN (:st_created, :st_configured)"
+    )
     for entry in items:
-        assert entry["Update"]["ConditionExpression"] == "attribute_exists(PK)"
+        assert entry["Update"]["ConditionExpression"] == expected
 
 
 # --- config_router (TestClient) ---
@@ -637,14 +681,13 @@ def config_client_bundle() -> tuple[TestClient, Mock, Mock, Mock]:
     ownership.verify_teacher_owns_exam = AsyncMock()
 
     storage = Mock()
-    storage.generate_upload_urls = AsyncMock(
-        return_value={name: f"https://u/{name}" for name in CONFIG_FILES}
-    )
+    _attach_confirm_storage_keys(storage)
+    storage.generate_upload_urls = AsyncMock(return_value=_mock_presigned_posts("e1"))
     storage.all_files_exist = AsyncMock(
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
     )
 
     repo = Mock()
@@ -702,6 +745,8 @@ def test_post_upload_urls_returns_200_with_four_presigned_urls(
     assert response.status_code == 200
     body = response.json()
     assert len(body["upload_urls"]) == 4
+    assert body["upload_urls"]["devoir.json"]["url"].startswith("http")
+    assert "fields" in body["upload_urls"]["devoir.json"]
     storage.generate_upload_urls.assert_awaited_once()
 
 

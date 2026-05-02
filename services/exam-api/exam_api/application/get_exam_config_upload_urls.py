@@ -13,8 +13,15 @@ class GetExamConfigUploadUrlsCommand(StrictModel):
     exam_id: str
 
 
+class PresignedPostBundle(StrictModel):
+    """Response fragment matching ``generate_presigned_post`` (url + form fields)."""
+
+    url: str
+    fields: dict[str, str]
+
+
 class GetExamConfigUploadUrlsResult(StrictModel):
-    upload_urls: dict[str, str]  # filename → presigned PUT URL
+    upload_urls: dict[str, PresignedPostBundle]
 
 
 class GetExamConfigUploadUrlsUseCase:
@@ -33,7 +40,14 @@ class GetExamConfigUploadUrlsUseCase:
             teacher_id=command.teacher_id,
             exam_id=command.exam_id,
         )
-        upload_urls = await self._config_storage.generate_upload_urls(
+        raw_posts = await self._config_storage.generate_upload_urls(
             exam_id=command.exam_id
         )
-        return GetExamConfigUploadUrlsResult(upload_urls=upload_urls)
+        bundles = {
+            fname: PresignedPostBundle(
+                url=data["url"],
+                fields={str(k): str(v) for k, v in data["fields"].items()},
+            )
+            for fname, data in raw_posts.items()
+        }
+        return GetExamConfigUploadUrlsResult(upload_urls=bundles)

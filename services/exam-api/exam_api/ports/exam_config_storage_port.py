@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 # Files required for exam configuration; order is not significant.
 CONFIG_FILES = ("devoir.json", "correction.json", "prompt.txt", "grille_notation.json")
@@ -10,10 +10,17 @@ CONFIG_FILES = ("devoir.json", "correction.json", "prompt.txt", "grille_notation
 
 @runtime_checkable
 class ExamConfigStoragePort(Protocol):
-    async def generate_upload_urls(self, *, exam_id: str) -> dict[str, str]:
-        """Return pre-signed S3 PUT URLs keyed by filename for each config file.
+    def config_object_key(self, *, exam_id: str, filename: str) -> str:
+        """S3 object key for a config file (``exams/{exam_id}/config/{filename}``)."""
+        ...
 
-        TTL is 15 minutes; keys use prefix ``exams/{exam_id}/config/``.
+    async def generate_upload_urls(
+        self, *, exam_id: str
+    ) -> dict[str, dict[str, Any]]:
+        """Return a presigned POST bundle per file: ``{url, fields}`` (see S3 API).
+
+        POST policy enforces a max object size; TTL 15 minutes; key prefix
+        ``exams/{exam_id}/config/``.
         """
         ...
 

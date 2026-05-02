@@ -12,6 +12,8 @@ from exam_api.domain.errors import ExamConfigMissingFilesError
 from exam_api.ports.exam_config_storage_port import CONFIG_FILES
 
 _UPLOAD_URL_TTL_SECONDS = 900  # 15 minutes
+# Per-file cap for config uploads (DoS / cost control) via presigned POST policy.
+_MAX_CONFIG_FILE_BYTES = 10 * 1024 * 1024
 
 T = TypeVar("T")
 
@@ -52,29 +54,34 @@ class S3ExamConfigStorage:
         ) as client:
             return await fn(client)
 
-    def _s3_key(self, exam_id: str, filename: str) -> str:
+    def config_object_key(self, *, exam_id: str, filename: str) -> str:
         return f"exams/{exam_id}/config/{filename}"
 
-    async def generate_upload_urls(self, *, exam_id: str) -> dict[str, str]:
-        urls: dict[str, str] = {}
+    async def generate_upload_urls(
+        self, *, exam_id: str
+    ) -> dict[str, dict[str, Any]]:
+        posts: dict[str, dict[str, Any]] = {}
 
         async def _run(client: Any) -> None:
             for filename in CONFIG_FILES:
-                url = await client.generate_presigned_url(
-                    "put_object",
-                    Params={
-                        "Bucket": self._bucket_name,
-                        "Key": self._s3_key(exam_id, filename),
-                    },
+                key = self.config_object_key(exam_id=exam_id, filename=filename)
+                post = await client.generate_presigned_post(
+                    self._bucket_name,
+                    key,
+                    Fields={"key": key},
+                    Conditions=[
+                        ["eq", "$key", key],
+                        ["content-length-range", 0, _MAX_CONFIG_FILE_BYTES],
+                    ],
                     ExpiresIn=_UPLOAD_URL_TTL_SECONDS,
                 )
-                urls[filename] = url
+                posts[filename] = post
 
         await self._use_client(_run)
-        return urls
+        return posts
 
     async def get_file_bytes(self, *, exam_id: str, filename: str) -> bytes:
-        key = self._s3_key(exam_id, filename)
+        key = self.config_object_key(exam_id=exam_id, filename=filename)
 
         async def _get(client: Any) -> bytes:
             try:
@@ -96,7 +103,7 @@ class S3ExamConfigStorage:
 
         async def _head_all(client: Any) -> None:
             for filename in CONFIG_FILES:
-                key = self._s3_key(exam_id, filename)
+                key = self.config_object_key(exam_id=exam_id, filename=filename)
                 try:
                     await client.head_object(Bucket=self._bucket_name, Key=key)
                     result[filename] = True

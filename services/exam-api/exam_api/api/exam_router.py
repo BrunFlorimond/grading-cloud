@@ -22,11 +22,7 @@ router = APIRouter(prefix="/exams", tags=["exams"])
 
 
 def _api_exam_status(status: ExamStatus) -> str:
-    if status == ExamStatus.CREATED:
-        return "CREATED"
-    if status == ExamStatus.CONFIGURED:
-        return "CONFIGURED"
-    return status.value
+    return status.name
 
 
 class CreateExamRequest(BaseModel):

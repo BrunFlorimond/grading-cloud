@@ -6,22 +6,18 @@ import os
 from typing import Any, Awaitable, Callable, TypeVar
 
 import aiobotocore.session
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.domain.errors import ExamConfigError
-from exam_api.infrastructure.dynamodb_exam_creation_repository import (
-    DynamoDbExamCreationRepository,
-    _TS_PREFIX,
-    _ddb_serialize,
-    _deserialize_item,
+from exam_api.domain.errors import ExamConfigError, ExamConfigWrongStatusError
+from exam_api.infrastructure.dynamodb_utils import (
+    TS_PREFIX,
+    ddb_serialize,
+    deserialize_item,
+    exam_from_dynamodb_flat,
 )
 
 T = TypeVar("T")
-
-_EXAM_FLAT_PARSER = DynamoDbExamCreationRepository(
-    table_name="_",
-    dynamodb_client=None,
-)
 
 
 class DynamoDbExamConfigRepository:
@@ -72,11 +68,11 @@ class DynamoDbExamConfigRepository:
             item = response.get("Item")
             if not item or not isinstance(item, dict):
                 return None
-            flat = _deserialize_item(item)
+            flat = deserialize_item(item)
             # METADATA items omit ``exam_id``; teacher listing edges include it.
             merged = dict(flat)
             merged.setdefault("exam_id", exam_id)
-            return _EXAM_FLAT_PARSER._exam_from_sort_item(merged)
+            return exam_from_dynamodb_flat(merged)
 
         return await self._use_client(_get)
 
@@ -87,7 +83,8 @@ class DynamoDbExamConfigRepository:
         config_s3_keys: dict[str, str],
     ) -> None:
         configured_value = ExamStatus.CONFIGURED.value
-        keys_attr = _ddb_serialize(config_s3_keys)
+        created_value = ExamStatus.CREATED.value
+        keys_attr = ddb_serialize(config_s3_keys)
 
         async def _save(client: Any) -> None:
             meta_response = await client.get_item(
@@ -102,13 +99,24 @@ class DynamoDbExamConfigRepository:
             if not meta_item:
                 raise ExamConfigError("Exam metadata not found for config save.")
 
-            flat = _deserialize_item(meta_item)
+            flat = deserialize_item(meta_item)
             teacher_id = flat.get("teacher_id")
             created_at = flat.get("created_at")
             if not isinstance(teacher_id, str) or not isinstance(created_at, str):
                 raise ValueError("Exam metadata is missing teacher_id or created_at.")
 
-            ts_sk = f"{_TS_PREFIX}{created_at}#{exam_id}"
+            ts_sk = f"{TS_PREFIX}{created_at}#{exam_id}"
+
+            common_values: dict[str, Any] = {
+                ":keys": keys_attr,
+                ":new_status": {"S": configured_value},
+                ":st_created": {"S": created_value},
+                ":st_configured": {"S": configured_value},
+            }
+
+            status_condition = (
+                "attribute_exists(PK) AND #st IN (:st_created, :st_configured)"
+            )
 
             transact_items: list[dict[str, Any]] = [
                 {
@@ -119,14 +127,11 @@ class DynamoDbExamConfigRepository:
                             "SK": {"S": "METADATA"},
                         },
                         "UpdateExpression": (
-                            "SET config_s3_keys = :keys, #st = :configured"
+                            "SET config_s3_keys = :keys, #st = :new_status"
                         ),
                         "ExpressionAttributeNames": {"#st": "status"},
-                        "ExpressionAttributeValues": {
-                            ":keys": keys_attr,
-                            ":configured": {"S": configured_value},
-                        },
-                        "ConditionExpression": "attribute_exists(PK)",
+                        "ExpressionAttributeValues": common_values,
+                        "ConditionExpression": status_condition,
                     }
                 },
                 {
@@ -136,12 +141,14 @@ class DynamoDbExamConfigRepository:
                             "PK": {"S": f"TEACHER#{teacher_id}"},
                             "SK": {"S": f"EXAM#{exam_id}"},
                         },
-                        "UpdateExpression": "SET #st = :configured",
+                        "UpdateExpression": "SET #st = :new_status",
                         "ExpressionAttributeNames": {"#st": "status"},
                         "ExpressionAttributeValues": {
-                            ":configured": {"S": configured_value},
+                            ":new_status": {"S": configured_value},
+                            ":st_created": {"S": created_value},
+                            ":st_configured": {"S": configured_value},
                         },
-                        "ConditionExpression": "attribute_exists(PK)",
+                        "ConditionExpression": status_condition,
                     }
                 },
                 {
@@ -151,16 +158,33 @@ class DynamoDbExamConfigRepository:
                             "PK": {"S": f"TEACHER#{teacher_id}"},
                             "SK": {"S": ts_sk},
                         },
-                        "UpdateExpression": "SET #st = :configured",
+                        "UpdateExpression": "SET #st = :new_status",
                         "ExpressionAttributeNames": {"#st": "status"},
                         "ExpressionAttributeValues": {
-                            ":configured": {"S": configured_value},
+                            ":new_status": {"S": configured_value},
+                            ":st_created": {"S": created_value},
+                            ":st_configured": {"S": configured_value},
                         },
-                        "ConditionExpression": "attribute_exists(PK)",
+                        "ConditionExpression": status_condition,
                     }
                 },
             ]
 
-            await client.transact_write_items(TransactItems=transact_items)
+            try:
+                await client.transact_write_items(TransactItems=transact_items)
+            except ClientError as err:
+                code = str(err.response.get("Error", {}).get("Code", ""))
+                if code == "TransactionCanceledException":
+                    reasons = err.response.get("CancellationReasons", [])
+                    if isinstance(reasons, list):
+                        for reason in reasons:
+                            if isinstance(reason, dict) and reason.get(
+                                "Code"
+                            ) == "ConditionalCheckFailed":
+                                raise ExamConfigWrongStatusError(
+                                    "Exam status changed or no longer allows confirming "
+                                    "configuration (expected created or configured)."
+                                ) from err
+                raise
 
         await self._use_client(_save)

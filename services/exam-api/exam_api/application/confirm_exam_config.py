@@ -72,7 +72,11 @@ class ConfirmExamConfigUseCase:
 
         exam_id = command.exam_id
         config_s3_keys = {
-            filename: f"exams/{exam_id}/config/{filename}" for filename in CONFIG_FILES
+            filename: self._config_storage.config_object_key(
+                exam_id=exam_id,
+                filename=filename,
+            )
+            for filename in CONFIG_FILES
         }
         await self._config_repository.save_exam_config(
             exam_id=exam_id,

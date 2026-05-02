@@ -58,3 +58,22 @@ class ExamCreationConflictError(ExamValidationError):
 
 class InvalidExamListCursorError(ExamValidationError):
     """Raised when the pagination cursor cannot be applied to DynamoDB."""
+
+
+class ExamConfigError(Exception):
+    """Base class for exam configuration errors."""
+
+
+class ExamConfigMissingFilesError(ExamConfigError):
+    """Raised when one or more required config files are absent from S3."""
+
+
+class ExamConfigInvalidJsonError(ExamConfigError):
+    """Raised when a .json config file cannot be parsed as valid JSON.
+
+    # TODO(#14): carry field-level detail — filename + parse error message.
+    """
+
+
+class ExamConfigWrongStatusError(ExamConfigError):
+    """Raised when the exam status does not allow configuration uploads."""

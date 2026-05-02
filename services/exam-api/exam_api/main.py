@@ -10,6 +10,7 @@ import aiobotocore.session
 from fastapi import FastAPI
 
 from exam_api.api.auth_router import router as auth_router
+from exam_api.api.config_router import router as config_router
 from exam_api.api.exam_router import router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import router as invite_router
@@ -21,6 +22,10 @@ from exam_api.infrastructure.dynamodb_exam_ownership_repository import (
     DynamoDbExamOwnershipRepository,
 )
 from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRepository
+from exam_api.infrastructure.dynamodb_exam_config_repository import (
+    DynamoDbExamConfigRepository,
+)
+from exam_api.infrastructure.s3_exam_config_storage import S3ExamConfigStorage
 from exam_api.infrastructure.student_invite_adapter import (
     CognitoSesStudentInviteAdapter,
 )
@@ -46,6 +51,9 @@ async def _lifespan(app: FastAPI):
             dynamodb_client=dynamodb_client,
         )
         app.state.jwt_verifier = _build_jwt_verifier()
+        # TODO(#14): open S3 client via aiobotocore and inject into S3ExamConfigStorage
+        # TODO(#14): app.state.exam_config_storage = _build_exam_config_storage(s3_client)
+        # TODO(#14): app.state.exam_config_repository = DynamoDbExamConfigRepository(table_name=table_name, dynamodb_client=dynamodb_client)
         yield
 
 
@@ -98,3 +106,4 @@ register_http_error_handlers(app)
 app.include_router(auth_router)
 app.include_router(invite_router)
 app.include_router(exam_router)
+app.include_router(config_router)

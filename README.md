@@ -90,6 +90,10 @@ pdf-generator Lambda (×N parallel)                                            �
 | CI/CD | GitHub Actions (OIDC, no long-lived keys) |
 | Dependency management | uv workspaces |
 
+### Teacher: exam config upload API
+
+Config files are uploaded **directly to S3** using **presigned POST** (multipart form), not presigned PUT — see [`services/exam-api/docs/exam-config-upload.md`](services/exam-api/docs/exam-config-upload.md) for the contract and **frontend integration** (`grading-cloud-web`).
+
 ---
 
 ## Design Principles

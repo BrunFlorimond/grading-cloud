@@ -58,3 +58,29 @@ class ExamCreationConflictError(ExamValidationError):
 
 class InvalidExamListCursorError(ExamValidationError):
     """Raised when the pagination cursor cannot be applied to DynamoDB."""
+
+
+class ExamConfigError(Exception):
+    """Base class for exam configuration errors."""
+
+
+class ExamConfigMissingFilesError(ExamConfigError):
+    """Raised when one or more required config files are absent from S3."""
+
+    def __init__(self, missing_filenames: list[str]) -> None:
+        self.missing_filenames = list(missing_filenames)
+        joined = ", ".join(missing_filenames)
+        super().__init__(f"Missing config files: {joined}")
+
+
+class ExamConfigInvalidJsonError(ExamConfigError):
+    """Raised when a .json config file cannot be parsed as valid JSON."""
+
+    def __init__(self, filename: str, parse_error: str) -> None:
+        self.filename = filename
+        self.parse_error = parse_error
+        super().__init__(f"Invalid JSON in {filename}: {parse_error}")
+
+
+class ExamConfigWrongStatusError(ExamConfigError):
+    """Raised when the exam status does not allow configuration uploads."""

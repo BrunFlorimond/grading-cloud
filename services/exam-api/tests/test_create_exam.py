@@ -272,6 +272,41 @@ def test_get_exams_requires_auth() -> None:
     assert response.status_code == 401
 
 
+def test_get_exams_returns_pipeline_status_as_enum_value_not_member_name(
+    exam_api_client: TestClient,
+) -> None:
+    """Regression: list uses StrEnum .value (e.g. ready) except CREATED/CONFIGURED labels."""
+    repo = exam_api_client.app.state.exam_creation_repository
+    repo.list_teacher_exams = AsyncMock(
+        return_value=ExamPage(
+            items=[
+                Exam(
+                    exam_id="e-ready",
+                    teacher_id="teacher-1",
+                    title="R",
+                    status=ExamStatus.READY,
+                    created_at="2026-05-01T12:00:00.000000Z",
+                ),
+                Exam(
+                    exam_id="e-draft",
+                    teacher_id="teacher-1",
+                    title="D",
+                    status=ExamStatus.DRAFT,
+                    created_at="2026-05-01T12:00:00.000000Z",
+                ),
+            ],
+            next_cursor=None,
+        )
+    )
+
+    response = exam_api_client.get("/exams", headers={"Authorization": "Bearer fake"})
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items[0]["status"] == "ready"
+    assert items[1]["status"] == "draft"
+
+
 def test_get_exams_returns_paginated_list(exam_api_client: TestClient) -> None:
     repo = exam_api_client.app.state.exam_creation_repository
     repo.list_teacher_exams = AsyncMock(

@@ -61,25 +61,27 @@ class S3ExamConfigStorage:
     async def generate_upload_urls(
         self, *, exam_id: str
     ) -> dict[str, dict[str, Any]]:
-        posts: dict[str, dict[str, Any]] = {}
+        async def _post_one(client: Any, filename: str) -> tuple[str, dict[str, Any]]:
+            key = self.config_object_key(exam_id=exam_id, filename=filename)
+            post = await client.generate_presigned_post(
+                self._bucket_name,
+                key,
+                Fields={"key": key},
+                Conditions=[
+                    ["eq", "$key", key],
+                    ["content-length-range", 0, _MAX_CONFIG_FILE_BYTES],
+                ],
+                ExpiresIn=_UPLOAD_URL_TTL_SECONDS,
+            )
+            return filename, post
 
-        async def _run(client: Any) -> None:
-            for filename in CONFIG_FILES:
-                key = self.config_object_key(exam_id=exam_id, filename=filename)
-                post = await client.generate_presigned_post(
-                    self._bucket_name,
-                    key,
-                    Fields={"key": key},
-                    Conditions=[
-                        ["eq", "$key", key],
-                        ["content-length-range", 0, _MAX_CONFIG_FILE_BYTES],
-                    ],
-                    ExpiresIn=_UPLOAD_URL_TTL_SECONDS,
-                )
-                posts[filename] = post
+        async def _run(client: Any) -> dict[str, dict[str, Any]]:
+            pairs = await asyncio.gather(
+                *[_post_one(client, fn) for fn in CONFIG_FILES]
+            )
+            return dict(pairs)
 
-        await self._use_client(_run)
-        return posts
+        return await self._use_client(_run)
 
     async def get_file_bytes(self, *, exam_id: str, filename: str) -> bytes:
         key = self.config_object_key(exam_id=exam_id, filename=filename)

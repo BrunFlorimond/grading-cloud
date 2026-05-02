@@ -23,7 +23,11 @@ class ListExamStudentStatusesUseCase:
     def __init__(self, exam_detail_repository: ExamDetailRepositoryPort) -> None:
         self._exam_detail_repository = exam_detail_repository
 
-    async def execute(self, command: ListExamStudentStatusesCommand) -> StudentPipelinePage:
-        # TODO(#16): call repository.list_exam_student_statuses with pagination args
-        # TODO(#16): propagate InvalidExamListCursorError on bad cursor
-        raise NotImplementedError
+    async def execute(
+        self, command: ListExamStudentStatusesCommand
+    ) -> StudentPipelinePage:
+        return await self._exam_detail_repository.list_exam_student_statuses(
+            exam_id=command.exam_id,
+            limit=command.limit,
+            cursor=command.cursor,
+        )

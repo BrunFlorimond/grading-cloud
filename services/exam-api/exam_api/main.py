@@ -45,7 +45,9 @@ async def _lifespan(app: FastAPI):
         raise RuntimeError("Missing GRADING_TABLE_NAME configuration.")
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
     if not region:
-        raise RuntimeError("Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client.")
+        raise RuntimeError(
+            "Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client."
+        )
     session = aiobotocore.session.get_session()
     exam_config_bucket = os.getenv("EXAM_CONFIG_BUCKET")
     if not exam_config_bucket:
@@ -70,11 +72,12 @@ async def _lifespan(app: FastAPI):
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,
             )
-            app.state.student_enrollment_repository = DynamoDbStudentEnrollmentRepository(
-                table_name=table_name,
-                dynamodb_client=dynamodb_client,
+            app.state.student_enrollment_repository = (
+                DynamoDbStudentEnrollmentRepository(
+                    table_name=table_name,
+                    dynamodb_client=dynamodb_client,
+                )
             )
-            # TODO(#16): wire DynamoDbExamDetailRepository once implementation is complete
             app.state.exam_detail_repository = DynamoDbExamDetailRepository(
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,

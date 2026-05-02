@@ -8,10 +8,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from grading_shared.domain.exam import ExamStatus
 from pydantic import BaseModel, ConfigDict, Field
 
-from exam_api.api.dependencies import CurrentTeacher, require_teacher, verify_teacher_exam_ownership
+from exam_api.api.dependencies import (
+    CurrentTeacher,
+    require_teacher,
+    verify_teacher_exam_ownership,
+)
 from exam_api.application.create_exam import CreateExamCommand, CreateExamUseCase
-from exam_api.application.get_exam_detail import GetExamDetailCommand, GetExamDetailUseCase
-from exam_api.application.list_teacher_exams import ListTeacherExamsCommand, ListTeacherExamsUseCase
+from exam_api.application.get_exam_detail import (
+    GetExamDetailCommand,
+    GetExamDetailUseCase,
+)
+from exam_api.application.list_teacher_exams import (
+    ListTeacherExamsCommand,
+    ListTeacherExamsUseCase,
+)
 from exam_api.domain.errors import (
     ExamCreationConflictError,
     ExamNotFoundError,
@@ -66,7 +76,6 @@ class ListExamsResponse(BaseModel):
 class StatusCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    # TODO(#16): extend fields once SubmissionStatus enum is finalised
     pending: int
 
 
@@ -79,7 +88,6 @@ class ExamDetailResponse(BaseModel):
     description: str | None
     subject: str | None
     created_at: str | None
-    # TODO(#16): confirm DynamoDB attribute names for pipeline timestamps
     pipeline_started_at: str | None
     pipeline_completed_at: str | None
     status_counts: StatusCountsResponse
@@ -95,7 +103,9 @@ def get_exam_detail_repository(request: Request) -> ExamDetailRepositoryPort:
 
 
 def provide_get_exam_detail_use_case(
-    repository: Annotated[ExamDetailRepositoryPort, Depends(get_exam_detail_repository)],
+    repository: Annotated[
+        ExamDetailRepositoryPort, Depends(get_exam_detail_repository)
+    ],
 ) -> GetExamDetailUseCase:
     return GetExamDetailUseCase(exam_detail_repository=repository)
 
@@ -110,13 +120,17 @@ def get_exam_creation_repository(request: Request) -> ExamCreationRepositoryPort
 
 
 def provide_create_exam_use_case(
-    repository: Annotated[ExamCreationRepositoryPort, Depends(get_exam_creation_repository)],
+    repository: Annotated[
+        ExamCreationRepositoryPort, Depends(get_exam_creation_repository)
+    ],
 ) -> CreateExamUseCase:
     return CreateExamUseCase(exam_repository=repository)
 
 
 def provide_list_teacher_exams_use_case(
-    repository: Annotated[ExamCreationRepositoryPort, Depends(get_exam_creation_repository)],
+    repository: Annotated[
+        ExamCreationRepositoryPort, Depends(get_exam_creation_repository)
+    ],
 ) -> ListTeacherExamsUseCase:
     return ListTeacherExamsUseCase(exam_repository=repository)
 
@@ -152,7 +166,9 @@ async def create_exam(
 @router.get("", response_model=ListExamsResponse, status_code=status.HTTP_200_OK)
 async def list_exams(
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    use_case: Annotated[ListTeacherExamsUseCase, Depends(provide_list_teacher_exams_use_case)],
+    use_case: Annotated[
+        ListTeacherExamsUseCase, Depends(provide_list_teacher_exams_use_case)
+    ],
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> ListExamsResponse:
@@ -182,14 +198,17 @@ async def list_exams(
     )
 
 
-@router.get("/{exam_id}", response_model=ExamDetailResponse, status_code=status.HTTP_200_OK)
+@router.get(
+    "/{exam_id}", response_model=ExamDetailResponse, status_code=status.HTTP_200_OK
+)
 async def get_exam_detail(
     exam_id: str,
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
     _: Annotated[None, Depends(verify_teacher_exam_ownership)],
-    use_case: Annotated[GetExamDetailUseCase, Depends(provide_get_exam_detail_use_case)],
+    use_case: Annotated[
+        GetExamDetailUseCase, Depends(provide_get_exam_detail_use_case)
+    ],
 ) -> ExamDetailResponse:
-    # TODO(#16): implement response mapping from ExamDetail domain object
     try:
         detail = await use_case.execute(
             GetExamDetailCommand(
@@ -202,7 +221,6 @@ async def get_exam_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(err),
         ) from err
-    # TODO(#16): map detail.status_counts to StatusCountsResponse
     return ExamDetailResponse(
         exam_id=detail.exam_id,
         title=detail.title,

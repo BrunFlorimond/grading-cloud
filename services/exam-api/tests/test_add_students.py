@@ -31,8 +31,16 @@ from exam_api.domain.errors import (
     StudentBatchTooLargeError,
 )
 from exam_api.domain.student import EnrolledStudent, SubmissionStatus
+from exam_api.infrastructure.dynamodb_exam_detail_repository import (
+    DynamoDbExamDetailRepository,
+)
 from exam_api.infrastructure.dynamodb_student_enrollment_repository import (
     DynamoDbStudentEnrollmentRepository,
+)
+from exam_api.ports.exam_detail_repository_port import (
+    ExamDetailRepositoryPort,
+    StudentPipelinePage,
+    StudentPipelineStatus,
 )
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
@@ -140,9 +148,7 @@ async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
 @pytest.mark.asyncio
 async def test_add_students_keeps_provided_student_id() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    enrollment.add_students = AsyncMock(
-        side_effect=lambda **kwargs: kwargs["students"]
-    )
+    enrollment.add_students = AsyncMock(side_effect=lambda **kwargs: kwargs["students"])
 
     use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
@@ -166,9 +172,7 @@ async def test_add_students_keeps_provided_student_id() -> None:
 @pytest.mark.asyncio
 async def test_add_students_sets_submission_status_pending() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    enrollment.add_students = AsyncMock(
-        side_effect=lambda **kwargs: kwargs["students"]
-    )
+    enrollment.add_students = AsyncMock(side_effect=lambda **kwargs: kwargs["students"])
 
     use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
@@ -322,13 +326,14 @@ def students_api_client() -> TestClient:
     app.include_router(student_router)
 
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    enrollment.add_students = AsyncMock(
-        side_effect=lambda **kwargs: kwargs["students"]
-    )
-    enrollment.list_exam_students = AsyncMock(
-        return_value=EnrolledStudentPage(items=[], next_cursor=None)
-    )
+    enrollment.add_students = AsyncMock(side_effect=lambda **kwargs: kwargs["students"])
     app.state.student_enrollment_repository = enrollment
+
+    exam_detail = Mock(spec=ExamDetailRepositoryPort)
+    exam_detail.list_exam_student_statuses = AsyncMock(
+        return_value=StudentPipelinePage(items=[], next_cursor=None),
+    )
+    app.state.exam_detail_repository = exam_detail
 
     ownership = Mock(spec=ExamOwnershipPort)
     ownership.verify_teacher_owns_exam = AsyncMock()
@@ -406,7 +411,9 @@ def test_post_students_empty_body_returns_422(students_api_client: TestClient) -
     assert response.status_code == 422
 
 
-def test_post_students_batch_over_50_returns_422(students_api_client: TestClient) -> None:
+def test_post_students_batch_over_50_returns_422(
+    students_api_client: TestClient,
+) -> None:
     body = [
         {
             "student_id": f"s{i}",
@@ -449,7 +456,9 @@ def test_post_students_duplicate_student_id_returns_409(
     assert response.status_code == 409
 
 
-def test_post_students_exam_not_found_returns_404(students_api_client: TestClient) -> None:
+def test_post_students_exam_not_found_returns_404(
+    students_api_client: TestClient,
+) -> None:
     ownership = students_api_client.app.state.exam_ownership_repository
     ownership.verify_teacher_owns_exam = AsyncMock(
         side_effect=ExamNotFoundError("Exam missing."),
@@ -523,21 +532,21 @@ def test_get_students_requires_auth() -> None:
 
 
 def test_get_students_returns_paginated_list(students_api_client: TestClient) -> None:
-    enrollment = students_api_client.app.state.student_enrollment_repository
-    enrollment.list_exam_students = AsyncMock(
-        return_value=EnrolledStudentPage(
+    exam_detail = students_api_client.app.state.exam_detail_repository
+    exam_detail.list_exam_student_statuses = AsyncMock(
+        return_value=StudentPipelinePage(
             items=[
-                EnrolledStudent(
+                StudentPipelineStatus(
                     student_id="s1",
-                    exam_id="exam-99",
                     nom="D",
                     prenom="P",
                     classe="C",
-                    submission_status=SubmissionStatus.PENDING,
+                    submission_status=SubmissionStatus.PENDING.value,
+                    pdf_available=False,
                 )
             ],
             next_cursor="next-page",
-        )
+        ),
     )
 
     response = students_api_client.get(
@@ -549,13 +558,14 @@ def test_get_students_returns_paginated_list(students_api_client: TestClient) ->
     body = response.json()
     assert len(body["items"]) == 1
     assert body["items"][0]["student_id"] == "s1"
+    assert body["items"][0]["pdf_available"] is False
     assert body["next_cursor"] == "next-page"
 
 
 def test_get_students_passes_limit_and_cursor_to_use_case(
     students_api_client: TestClient,
 ) -> None:
-    enrollment = students_api_client.app.state.student_enrollment_repository
+    exam_detail = students_api_client.app.state.exam_detail_repository
 
     response = students_api_client.get(
         "/exams/exam-99/students?limit=5&cursor=abc",
@@ -563,19 +573,21 @@ def test_get_students_passes_limit_and_cursor_to_use_case(
     )
 
     assert response.status_code == 200
-    enrollment.list_exam_students.assert_awaited()
-    kwargs = enrollment.list_exam_students.await_args.kwargs
+    exam_detail.list_exam_student_statuses.assert_awaited()
+    kwargs = exam_detail.list_exam_student_statuses.await_args.kwargs
     assert kwargs["limit"] == 5
     assert kwargs["cursor"] == "abc"
 
 
-def test_get_students_invalid_cursor_returns_422(students_api_client: TestClient) -> None:
+def test_get_students_invalid_cursor_returns_422(
+    students_api_client: TestClient,
+) -> None:
     ddb = AsyncMock()
-    repo = DynamoDbStudentEnrollmentRepository(
+    repo = DynamoDbExamDetailRepository(
         table_name="grading-table",
         dynamodb_client=ddb,
     )
-    students_api_client.app.state.student_enrollment_repository = repo
+    students_api_client.app.state.exam_detail_repository = repo
 
     response = students_api_client.get(
         "/exams/exam-99/students?cursor=@@@@",
@@ -590,11 +602,11 @@ def test_get_students_cursor_for_wrong_exam_returns_422(
     students_api_client: TestClient,
 ) -> None:
     ddb = AsyncMock()
-    repo = DynamoDbStudentEnrollmentRepository(
+    repo = DynamoDbExamDetailRepository(
         table_name="grading-table",
         dynamodb_client=ddb,
     )
-    students_api_client.app.state.student_enrollment_repository = repo
+    students_api_client.app.state.exam_detail_repository = repo
 
     wrong_cursor = _encode_lek_local(
         {
@@ -748,7 +760,9 @@ async def test_list_exam_students_cursor_pagination() -> None:
 
     page1 = await repo.list_exam_students(exam_id="e1", limit=5, cursor=None)
     assert page1.next_cursor is not None
-    raw = base64.urlsafe_b64decode(page1.next_cursor + "=" * (-len(page1.next_cursor) % 4))
+    raw = base64.urlsafe_b64decode(
+        page1.next_cursor + "=" * (-len(page1.next_cursor) % 4)
+    )
     assert json.loads(raw.decode("utf-8")) == {
         "PK": {"S": "EXAM#e1"},
         "SK": {"S": "STUDENT#s1"},

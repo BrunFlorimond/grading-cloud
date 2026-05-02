@@ -21,17 +21,16 @@ from exam_api.application.list_exam_student_statuses import (
     ListExamStudentStatusesCommand,
     ListExamStudentStatusesUseCase,
 )
-from exam_api.application.list_exam_students import (
-    ListExamStudentsCommand,
-    ListExamStudentsUseCase,
-)
+from exam_api.application.list_exam_students import ListExamStudentsUseCase
 from exam_api.domain.errors import (
     DuplicateStudentError,
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
-from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
+from exam_api.ports.student_enrollment_repository_port import (
+    StudentEnrollmentRepositoryPort,
+)
 
 router = APIRouter(prefix="/exams", tags=["students"])
 
@@ -93,7 +92,6 @@ class StudentPipelineStatusSchema(BaseModel):
     prenom: str
     classe: str
     submission_status: str
-    # TODO(#16): pdf_available — sourced from DynamoDB flag or S3 key existence
     pdf_available: bool
 
 
@@ -119,7 +117,9 @@ def get_exam_detail_repository(request: Request) -> ExamDetailRepositoryPort:
 
 
 def provide_list_student_statuses_use_case(
-    repository: Annotated[ExamDetailRepositoryPort, Depends(get_exam_detail_repository)],
+    repository: Annotated[
+        ExamDetailRepositoryPort, Depends(get_exam_detail_repository)
+    ],
 ) -> ListExamStudentStatusesUseCase:
     return ListExamStudentStatusesUseCase(exam_detail_repository=repository)
 
@@ -224,7 +224,6 @@ async def list_students(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> ListStudentStatusesResponse:
-    # TODO(#16): implement once ListExamStudentStatusesUseCase.execute is filled in
     try:
         page = await use_case.execute(
             ListExamStudentStatusesCommand(

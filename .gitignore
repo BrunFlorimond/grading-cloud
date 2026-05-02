@@ -3,3 +3,6 @@ Agent.md
 .claude/agents/
 __pycache__/
 *.pyc
+
+# Local git-worktree / tooling copies (never commit)
+/worktrees/

@@ -108,6 +108,7 @@ jobs:
           else
             echo "No tests found yet. Skipping execution."
           fi
+          (cd infra && uv sync --all-groups && uv run pytest tests/)
 
   cdk-synth:
     name: CDK synth

@@ -19,6 +19,7 @@ from exam_api.application.get_exam_config_upload_urls import (
     PresignedPostBundle,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     ExamConfigError,
     ExamConfigInvalidJsonError,
     ExamConfigMissingFilesError,
@@ -112,8 +113,8 @@ async def get_config_upload_urls(
         ) from err
     except ExamOwnershipError as err:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": str(err), "code": "exam_ownership"},
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=EXAM_NOT_FOUND_FOR_CLIENT,
         ) from err
     return UploadUrlsResponse(upload_urls=result.upload_urls)
 
@@ -142,8 +143,8 @@ async def confirm_config(
         ) from err
     except ExamOwnershipError as err:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": str(err), "code": "exam_ownership"},
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=EXAM_NOT_FOUND_FOR_CLIENT,
         ) from err
     except ExamConfigMissingFilesError as err:
         raise HTTPException(

@@ -23,7 +23,8 @@ class SubmissionStatus(StrEnum):
     """Lifecycle status of a student's submission within an exam."""
 
     PENDING = "PENDING"
-    # TODO(#15): add SUBMITTED, GRADED once pipeline events are wired
+    CONVERTED = "CONVERTED"
+    CORRECTED = "CORRECTED"
 
 
 class EnrolledStudent(StrictModel):

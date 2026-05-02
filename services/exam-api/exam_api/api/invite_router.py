@@ -19,6 +19,7 @@ from exam_api.application.invite_student import (
     InviteStudentUseCase,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     ExamNotFoundError,
     ExamOwnershipError,
     StudentExamScopeConflictError,
@@ -126,11 +127,8 @@ async def invite_student(
     except ExamOwnershipError as err:
         # Defense in depth: dependency checks TEACHER#/EXAM#; use case re-checks exam metadata.
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": str(err),
-                "code": "exam_ownership",
-            },
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=EXAM_NOT_FOUND_FOR_CLIENT,
         ) from err
     except StudentExamScopeConflictError as err:
         raise HTTPException(

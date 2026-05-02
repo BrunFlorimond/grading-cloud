@@ -23,6 +23,7 @@ from exam_api.application.get_exam_config_upload_urls import (
     PresignedPostBundle,
 )
 from exam_api.domain.errors import (
+    EXAM_NOT_FOUND_FOR_CLIENT,
     ExamConfigInvalidJsonError,
     ExamConfigMissingFilesError,
     ExamConfigWrongStatusError,
@@ -772,7 +773,7 @@ def test_post_upload_urls_returns_404_when_exam_not_found(
     assert response.status_code == 404
 
 
-def test_post_upload_urls_returns_403_when_teacher_does_not_own_exam(
+def test_post_upload_urls_returns_404_when_teacher_does_not_own_exam(
     config_client_bundle: tuple[TestClient, Mock, Mock, Mock],
 ) -> None:
     client, ownership, _, _ = config_client_bundle
@@ -785,7 +786,8 @@ def test_post_upload_urls_returns_403_when_teacher_does_not_own_exam(
         headers={"Authorization": "Bearer fake"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert response.json()["detail"] == EXAM_NOT_FOUND_FOR_CLIENT
 
 
 def test_post_confirm_requires_auth() -> None:

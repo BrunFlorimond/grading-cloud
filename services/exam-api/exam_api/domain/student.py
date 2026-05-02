@@ -1,6 +1,8 @@
-"""Student domain entity for the invitation flow."""
+"""Student domain entities for the invitation and enrollment flows."""
 
 from __future__ import annotations
+
+from enum import StrEnum
 
 # TODO(#10): decide whether InvitationStatus belongs here or as a StrEnum sibling
 from grading_shared.domain.models import StrictModel
@@ -15,3 +17,23 @@ class Student(StrictModel):
     exam_id: str
     email: EmailStr
     # TODO(#10): store temporary_password transiently (never persist); pass through invite flow only
+
+
+class SubmissionStatus(StrEnum):
+    """Lifecycle status of a student's submission within an exam."""
+
+    PENDING = "PENDING"
+    # TODO(#15): add SUBMITTED, GRADED once pipeline events are wired
+
+
+class EnrolledStudent(StrictModel):
+    """Student registered for an exam by a teacher (school-ID-based, pre-invite)."""
+
+    # TODO(#15): confirm whether student_id must be unique globally or per-exam only
+    student_id: str
+    exam_id: str
+    nom: str
+    prenom: str
+    classe: str
+    email: EmailStr | None = None
+    submission_status: SubmissionStatus = SubmissionStatus.PENDING

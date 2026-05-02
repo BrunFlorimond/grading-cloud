@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.api.invite_router import get_exam_ownership_repository
+from exam_api.api.dependencies import get_exam_ownership_repository
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,
     ConfirmExamConfigUseCase,

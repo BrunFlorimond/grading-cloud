@@ -26,6 +26,9 @@ from exam_api.infrastructure.dynamodb_invite_repository import DynamoDbInviteRep
 from exam_api.infrastructure.dynamodb_exam_config_repository import (
     DynamoDbExamConfigRepository,
 )
+from exam_api.infrastructure.dynamodb_exam_detail_repository import (
+    DynamoDbExamDetailRepository,
+)
 from exam_api.infrastructure.dynamodb_student_enrollment_repository import (
     DynamoDbStudentEnrollmentRepository,
 )
@@ -68,6 +71,11 @@ async def _lifespan(app: FastAPI):
                 dynamodb_client=dynamodb_client,
             )
             app.state.student_enrollment_repository = DynamoDbStudentEnrollmentRepository(
+                table_name=table_name,
+                dynamodb_client=dynamodb_client,
+            )
+            # TODO(#16): wire DynamoDbExamDetailRepository once implementation is complete
+            app.state.exam_detail_repository = DynamoDbExamDetailRepository(
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,
             )

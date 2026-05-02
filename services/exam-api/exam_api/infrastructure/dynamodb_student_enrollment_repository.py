@@ -152,7 +152,12 @@ class DynamoDbStudentEnrollmentRepository:
                     if code == "TransactionCanceledException":
                         fail_sid = self._failure_student_id(chunk, err)
                         if chunk_start > 0 and committed_ids:
-                            await self._compensate_delete(client, exam_id, committed_ids)
+                            try:
+                                await self._compensate_delete(
+                                    client, exam_id, committed_ids
+                                )
+                            except ClientError:
+                                pass
                             committed_ids = []
                         raise DuplicateStudentError(fail_sid, exam_id) from err
                     raise
@@ -188,6 +193,9 @@ class DynamoDbStudentEnrollmentRepository:
                 raise InvalidExamListCursorError("Invalid pagination cursor.") from err
             if not _is_valid_exclusive_start_key(decoded):
                 raise InvalidExamListCursorError("Invalid pagination cursor.")
+            pk_expected = f"EXAM#{exam_id}"
+            if decoded.get("PK", {}).get("S") != pk_expected:
+                raise InvalidExamListCursorError("Invalid pagination cursor.")
             exclusive_start_key = decoded
 
         async def _query(client: Any) -> EnrolledStudentPage:
@@ -206,7 +214,12 @@ class DynamoDbStudentEnrollmentRepository:
             try:
                 response = await client.query(**kwargs)
             except ClientError as err:
-                raise InvalidExamListCursorError("Invalid pagination cursor.") from err
+                code = err.response.get("Error", {}).get("Code", "")
+                if code == "ValidationException":
+                    raise InvalidExamListCursorError(
+                        "Invalid pagination cursor."
+                    ) from err
+                raise
 
             items_out: list[EnrolledStudent] = []
             for item in response.get("Items", []):

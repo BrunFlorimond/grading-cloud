@@ -7,16 +7,8 @@ import uuid
 from grading_shared.domain.models import StrictModel
 from pydantic import EmailStr
 
-from exam_api.domain.errors import (
-    DuplicateStudentError,
-    EnrollmentExamNotFoundError,
-    EnrollmentExamOwnershipError,
-    ExamNotFoundError,
-    ExamOwnershipError,
-    StudentBatchTooLargeError,
-)
+from exam_api.domain.errors import DuplicateStudentError, StudentBatchTooLargeError
 from exam_api.domain.student import EnrolledStudent, SubmissionStatus
-from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
 
 _MAX_BATCH_SIZE = 50
@@ -43,17 +35,16 @@ class AddStudentsResult(StrictModel):
 
 
 class AddStudentsUseCase:
+    """Ownership is enforced by ``verify_teacher_exam_ownership`` on the router."""
+
     def __init__(
         self,
         enrollment_repository: StudentEnrollmentRepositoryPort,
-        exam_ownership_port: ExamOwnershipPort,
     ) -> None:
         self._enrollment_repository = enrollment_repository
-        self._exam_ownership_port = exam_ownership_port
 
     async def execute(self, command: AddStudentsCommand) -> AddStudentsResult:
         self._validate_batch(command.students)
-        await self._check_ownership(exam_id=command.exam_id, teacher_id=command.teacher_id)
         entities = self._build_entities(
             exam_id=command.exam_id, students=command.students
         )
@@ -66,16 +57,6 @@ class AddStudentsUseCase:
     def _validate_batch(self, students: list[StudentInput]) -> None:
         if len(students) > _MAX_BATCH_SIZE:
             raise StudentBatchTooLargeError()
-
-    async def _check_ownership(self, *, exam_id: str, teacher_id: str) -> None:
-        try:
-            await self._exam_ownership_port.verify_teacher_owns_exam(
-                teacher_id=teacher_id, exam_id=exam_id
-            )
-        except ExamNotFoundError as err:
-            raise EnrollmentExamNotFoundError(str(err)) from err
-        except ExamOwnershipError as err:
-            raise EnrollmentExamOwnershipError(str(err)) from err
 
     def _build_entities(
         self, *, exam_id: str, students: list[StudentInput]

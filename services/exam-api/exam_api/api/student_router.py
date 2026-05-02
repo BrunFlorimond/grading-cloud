@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
@@ -91,22 +91,22 @@ def provide_add_students_use_case(
     repository: Annotated[
         StudentEnrollmentRepositoryPort, Depends(get_enrollment_repository)
     ],
-    exam_ownership: Annotated[
-        ExamOwnershipPort, Depends(get_exam_ownership_repository)
-    ],
 ) -> AddStudentsUseCase:
-    return AddStudentsUseCase(
-        enrollment_repository=repository,
-        exam_ownership_port=exam_ownership,
-    )
+    return AddStudentsUseCase(enrollment_repository=repository)
 
 
 def provide_list_students_use_case(
     repository: Annotated[
         StudentEnrollmentRepositoryPort, Depends(get_enrollment_repository)
     ],
+    exam_ownership: Annotated[
+        ExamOwnershipPort, Depends(get_exam_ownership_repository)
+    ],
 ) -> ListExamStudentsUseCase:
-    return ListExamStudentsUseCase(enrollment_repository=repository)
+    return ListExamStudentsUseCase(
+        enrollment_repository=repository,
+        exam_ownership_port=exam_ownership,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ async def add_students(
     exam_id: str,
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
     _: Annotated[None, Depends(verify_teacher_exam_ownership)],
-    body: Annotated[list[StudentInputSchema], Field(min_length=1, max_length=50)],
+    body: Annotated[list[StudentInputSchema], Body(min_length=1, max_length=50)],
     use_case: Annotated[AddStudentsUseCase, Depends(provide_add_students_use_case)],
 ) -> AddStudentsResponse:
     try:
@@ -152,19 +152,6 @@ async def add_students(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(err),
-        ) from err
-    except EnrollmentExamNotFoundError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(err),
-        ) from err
-    except EnrollmentExamOwnershipError as err:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": str(err),
-                "code": "exam_ownership",
-            },
         ) from err
 
     return AddStudentsResponse(
@@ -208,6 +195,19 @@ async def list_students(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(err),
+        ) from err
+    except EnrollmentExamNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
+    except EnrollmentExamOwnershipError as err:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": str(err),
+                "code": "exam_ownership",
+            },
         ) from err
 
     return ListStudentsResponse(

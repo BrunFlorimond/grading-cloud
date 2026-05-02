@@ -26,9 +26,8 @@ from exam_api.application.list_exam_students import (
 from exam_api.domain.errors import (
     DuplicateStudentError,
     EnrollmentExamNotFoundError,
-    EnrollmentExamOwnershipError,
     ExamNotFoundError,
-    ExamOwnershipError,
+    InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
 from exam_api.domain.student import EnrolledStudent, SubmissionStatus
@@ -51,14 +50,17 @@ def _uuid4_string(value: str) -> bool:
     return parsed.version == 4
 
 
+def _encode_lek_local(key: dict[str, object]) -> str:
+    raw = json.dumps(key, sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
 # --- AddStudentsUseCase ---
 
 
 @pytest.mark.asyncio
 async def test_add_students_returns_created_list() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
     created = [
         EnrolledStudent(
             student_id="s1",
@@ -79,10 +81,7 @@ async def test_add_students_returns_created_list() -> None:
     ]
     enrollment.add_students = AsyncMock(return_value=created)
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
         AddStudentsCommand(
             exam_id="e1",
@@ -112,8 +111,6 @@ async def test_add_students_returns_created_list() -> None:
 @pytest.mark.asyncio
 async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
 
     async def _capture(**kwargs: object) -> list[EnrolledStudent]:
         students = kwargs["students"]
@@ -122,10 +119,7 @@ async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
 
     enrollment.add_students = AsyncMock(side_effect=_capture)
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
         AddStudentsCommand(
             exam_id="e1",
@@ -146,16 +140,11 @@ async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
 @pytest.mark.asyncio
 async def test_add_students_keeps_provided_student_id() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
     enrollment.add_students = AsyncMock(
         side_effect=lambda **kwargs: kwargs["students"]
     )
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
         AddStudentsCommand(
             exam_id="e1",
@@ -177,16 +166,11 @@ async def test_add_students_keeps_provided_student_id() -> None:
 @pytest.mark.asyncio
 async def test_add_students_sets_submission_status_pending() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
     enrollment.add_students = AsyncMock(
         side_effect=lambda **kwargs: kwargs["students"]
     )
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
     result = await use_case.execute(
         AddStudentsCommand(
             exam_id="e1",
@@ -208,11 +192,7 @@ async def test_add_students_sets_submission_status_pending() -> None:
 @pytest.mark.asyncio
 async def test_add_students_raises_when_batch_exceeds_50() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
 
     with pytest.raises(StudentBatchTooLargeError):
         await use_case.execute(
@@ -235,16 +215,11 @@ async def test_add_students_raises_when_batch_exceeds_50() -> None:
 @pytest.mark.asyncio
 async def test_add_students_raises_on_duplicate_student_id_from_repository() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
     enrollment.add_students = AsyncMock(
         side_effect=DuplicateStudentError("s1", "e1"),
     )
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
 
     with pytest.raises(DuplicateStudentError):
         await use_case.execute(
@@ -266,13 +241,8 @@ async def test_add_students_raises_on_duplicate_student_id_from_repository() -> 
 @pytest.mark.asyncio
 async def test_add_students_raises_on_duplicate_student_id_in_request() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock()
 
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
+    use_case = AddStudentsUseCase(enrollment_repository=enrollment)
 
     with pytest.raises(DuplicateStudentError):
         await use_case.execute(
@@ -297,66 +267,6 @@ async def test_add_students_raises_on_duplicate_student_id_in_request() -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_add_students_raises_on_exam_not_found() -> None:
-    enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock(
-        side_effect=ExamNotFoundError("missing"),
-    )
-
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
-
-    with pytest.raises(EnrollmentExamNotFoundError):
-        await use_case.execute(
-            AddStudentsCommand(
-                exam_id="e1",
-                teacher_id="t1",
-                students=[
-                    StudentInput(
-                        student_id="s1",
-                        nom="Doe",
-                        prenom="Jane",
-                        classe="A",
-                    )
-                ],
-            )
-        )
-
-
-@pytest.mark.asyncio
-async def test_add_students_raises_on_wrong_owner() -> None:
-    enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
-    ownership = Mock(spec=ExamOwnershipPort)
-    ownership.verify_teacher_owns_exam = AsyncMock(
-        side_effect=ExamOwnershipError("no"),
-    )
-
-    use_case = AddStudentsUseCase(
-        enrollment_repository=enrollment,
-        exam_ownership_port=ownership,
-    )
-
-    with pytest.raises(EnrollmentExamOwnershipError):
-        await use_case.execute(
-            AddStudentsCommand(
-                exam_id="e1",
-                teacher_id="t1",
-                students=[
-                    StudentInput(
-                        student_id="s1",
-                        nom="Doe",
-                        prenom="Jane",
-                        classe="A",
-                    )
-                ],
-            )
-        )
-
-
 # --- ListExamStudentsUseCase ---
 
 
@@ -365,8 +275,13 @@ async def test_list_exam_students_delegates_to_repository() -> None:
     page = EnrolledStudentPage(items=[], next_cursor=None)
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     enrollment.list_exam_students = AsyncMock(return_value=page)
+    ownership = Mock(spec=ExamOwnershipPort)
+    ownership.verify_teacher_owns_exam = AsyncMock()
 
-    use_case = ListExamStudentsUseCase(enrollment_repository=enrollment)
+    use_case = ListExamStudentsUseCase(
+        enrollment_repository=enrollment,
+        exam_ownership_port=ownership,
+    )
     await use_case.execute(
         ListExamStudentsCommand(
             exam_id="e1",
@@ -376,6 +291,10 @@ async def test_list_exam_students_delegates_to_repository() -> None:
         )
     )
 
+    ownership.verify_teacher_owns_exam.assert_awaited_once_with(
+        teacher_id="t1",
+        exam_id="e1",
+    )
     enrollment.list_exam_students.assert_awaited_once_with(
         exam_id="e1",
         limit=20,
@@ -388,8 +307,13 @@ async def test_list_exam_students_returns_page_from_repository() -> None:
     page = EnrolledStudentPage(items=[], next_cursor="next")
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     enrollment.list_exam_students = AsyncMock(return_value=page)
+    ownership = Mock(spec=ExamOwnershipPort)
+    ownership.verify_teacher_owns_exam = AsyncMock()
 
-    use_case = ListExamStudentsUseCase(enrollment_repository=enrollment)
+    use_case = ListExamStudentsUseCase(
+        enrollment_repository=enrollment,
+        exam_ownership_port=ownership,
+    )
     result = await use_case.execute(
         ListExamStudentsCommand(
             exam_id="e1",
@@ -400,6 +324,29 @@ async def test_list_exam_students_returns_page_from_repository() -> None:
     )
 
     assert result is page
+
+
+@pytest.mark.asyncio
+async def test_list_exam_students_raises_enrollment_exam_not_found() -> None:
+    enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
+    ownership = Mock(spec=ExamOwnershipPort)
+    ownership.verify_teacher_owns_exam = AsyncMock(
+        side_effect=ExamNotFoundError("missing"),
+    )
+    use_case = ListExamStudentsUseCase(
+        enrollment_repository=enrollment,
+        exam_ownership_port=ownership,
+    )
+
+    with pytest.raises(EnrollmentExamNotFoundError):
+        await use_case.execute(
+            ListExamStudentsCommand(
+                exam_id="e1",
+                teacher_id="t1",
+                limit=20,
+                cursor=None,
+            )
+        )
 
 
 # --- student_router (TestClient) ---
@@ -622,6 +569,48 @@ def test_get_students_passes_limit_and_cursor_to_use_case(
     assert kwargs["cursor"] == "abc"
 
 
+def test_get_students_invalid_cursor_returns_422(students_api_client: TestClient) -> None:
+    ddb = AsyncMock()
+    repo = DynamoDbStudentEnrollmentRepository(
+        table_name="grading-table",
+        dynamodb_client=ddb,
+    )
+    students_api_client.app.state.student_enrollment_repository = repo
+
+    response = students_api_client.get(
+        "/exams/exam-99/students?cursor=@@@@",
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 422
+    ddb.query.assert_not_called()
+
+
+def test_get_students_cursor_for_wrong_exam_returns_422(
+    students_api_client: TestClient,
+) -> None:
+    ddb = AsyncMock()
+    repo = DynamoDbStudentEnrollmentRepository(
+        table_name="grading-table",
+        dynamodb_client=ddb,
+    )
+    students_api_client.app.state.student_enrollment_repository = repo
+
+    wrong_cursor = _encode_lek_local(
+        {
+            "PK": {"S": "EXAM#other-exam"},
+            "SK": {"S": "STUDENT#s1"},
+        }
+    )
+    response = students_api_client.get(
+        f"/exams/exam-99/students?cursor={wrong_cursor}",
+        headers={"Authorization": "Bearer fake"},
+    )
+
+    assert response.status_code == 422
+    ddb.query.assert_not_called()
+
+
 # --- DynamoDbStudentEnrollmentRepository ---
 
 
@@ -770,3 +759,90 @@ async def test_list_exam_students_cursor_pagination() -> None:
     assert client.query.await_count == 2
     second_kwargs = client.query.await_args_list[1].kwargs
     assert second_kwargs["ExclusiveStartKey"] == lek
+
+
+@pytest.mark.asyncio
+async def test_list_exam_students_validation_exception_maps_to_invalid_cursor() -> None:
+    cursor = _encode_lek_local(
+        {
+            "PK": {"S": "EXAM#e1"},
+            "SK": {"S": "STUDENT#s1"},
+        }
+    )
+    client = AsyncMock()
+    client.query = AsyncMock(
+        side_effect=ClientError(
+            {"Error": {"Code": "ValidationException", "Message": "bad key"}},
+            "Query",
+        )
+    )
+    repo = DynamoDbStudentEnrollmentRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+
+    with pytest.raises(InvalidExamListCursorError):
+        await repo.list_exam_students(exam_id="e1", limit=5, cursor=cursor)
+
+
+@pytest.mark.asyncio
+async def test_list_exam_students_non_validation_client_error_propagates() -> None:
+    client = AsyncMock()
+    client.query = AsyncMock(
+        side_effect=ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "denied"}},
+            "Query",
+        )
+    )
+    repo = DynamoDbStudentEnrollmentRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+
+    with pytest.raises(ClientError):
+        await repo.list_exam_students(exam_id="e1", limit=5, cursor=None)
+
+
+@pytest.mark.asyncio
+async def test_add_students_second_chunk_failure_compensates_first_chunk() -> None:
+    dup_err = ClientError(
+        {
+            "Error": {"Code": "TransactionCanceledException", "Message": "x"},
+            "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
+        },
+        "TransactWriteItems",
+    )
+    tw_calls = 0
+
+    async def _tw(**kwargs: object) -> None:
+        nonlocal tw_calls
+        tw_calls += 1
+        if tw_calls == 2:
+            raise dup_err
+
+    client = AsyncMock()
+    client.transact_write_items = AsyncMock(side_effect=_tw)
+    repo = DynamoDbStudentEnrollmentRepository(
+        table_name="grading-table",
+        dynamodb_client=client,
+    )
+    students = [
+        EnrolledStudent(
+            student_id=f"s{i}",
+            exam_id="e1",
+            nom="N",
+            prenom="P",
+            classe="C",
+            submission_status=SubmissionStatus.PENDING,
+        )
+        for i in range(26)
+    ]
+
+    with pytest.raises(DuplicateStudentError):
+        await repo.add_students(exam_id="e1", students=students)
+
+    assert tw_calls == 3
+    third_call = client.transact_write_items.await_args_list[2]
+    deletes = third_call.kwargs["TransactItems"]
+    assert len(deletes) == 25
+    assert all("Delete" in entry for entry in deletes)

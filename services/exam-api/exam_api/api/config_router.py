@@ -23,6 +23,7 @@ from exam_api.application.get_exam_config_upload_urls import (
 from exam_api.domain.errors import (
     ExamConfigInvalidJsonError,
     ExamConfigMissingFilesError,
+    ExamConfigWrongStatusError,
     ExamNotFoundError,
     ExamOwnershipError,
 )
@@ -150,12 +151,35 @@ async def confirm_config(
     except ExamConfigMissingFilesError as err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(err),
+            detail=[
+                {
+                    "type": "missing_config_files",
+                    "loc": ["body", "files"],
+                    "msg": "One or more required config files are absent from storage.",
+                    "missing": err.missing_filenames,
+                }
+            ],
         ) from err
     except ExamConfigInvalidJsonError as err:
-        # TODO(#14): return structured 422 with field-level error detail (filename + parse error)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(err),
+            detail=[
+                {
+                    "type": "json_invalid",
+                    "loc": ["body", err.filename],
+                    "msg": err.parse_error,
+                }
+            ],
+        ) from err
+    except ExamConfigWrongStatusError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=[
+                {
+                    "type": "wrong_exam_status",
+                    "loc": ["body", "exam"],
+                    "msg": str(err),
+                }
+            ],
         ) from err
     return ConfirmConfigResponse(exam_id=result.exam_id, status=result.status)

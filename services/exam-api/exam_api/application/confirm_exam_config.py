@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
+from grading_shared.domain.exam import ExamStatus
 from grading_shared.domain.models import StrictModel
 
+from exam_api.domain.errors import (
+    ExamConfigInvalidJsonError,
+    ExamConfigMissingFilesError,
+    ExamConfigWrongStatusError,
+    ExamNotFoundError,
+)
 from exam_api.ports.exam_config_repository_port import ExamConfigRepositoryPort
-from exam_api.ports.exam_config_storage_port import ExamConfigStoragePort
+from exam_api.ports.exam_config_storage_port import CONFIG_FILES, ExamConfigStoragePort
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 
 
@@ -31,10 +40,42 @@ class ConfirmExamConfigUseCase:
         self._config_repository = config_repository
 
     async def execute(self, command: ConfirmExamConfigCommand) -> ConfirmExamConfigResult:
-        # TODO(#14): verify ownership via self._exam_ownership.verify_teacher_owns_exam
-        # TODO(#14): call self._config_storage.all_files_exist; raise ExamConfigMissingFilesError listing absent files
-        # TODO(#14): for each .json file, fetch bytes via self._config_storage.get_file_bytes and json.loads; raise ExamConfigInvalidJsonError with filename + parse error on failure
-        # TODO(#14): build config_s3_keys = {filename: f"exams/{exam_id}/config/{filename}" for each file}
-        # TODO(#14): call self._config_repository.save_exam_config(exam_id=..., config_s3_keys=...)
-        # TODO(#14): return ConfirmExamConfigResult(exam_id=command.exam_id, status="CONFIGURED")
-        raise NotImplementedError
+        await self._exam_ownership.verify_teacher_owns_exam(
+            teacher_id=command.teacher_id,
+            exam_id=command.exam_id,
+        )
+        exam = await self._config_repository.get_exam_for_config(exam_id=command.exam_id)
+        if exam is None:
+            raise ExamNotFoundError(f"Exam {command.exam_id} not found.")
+        if exam.status not in (ExamStatus.CREATED, ExamStatus.CONFIGURED):
+            raise ExamConfigWrongStatusError(
+                "Exam must be in created or configured status to confirm configuration; "
+                f"current status is {exam.status.value}."
+            )
+
+        presence = await self._config_storage.all_files_exist(exam_id=command.exam_id)
+        missing = [name for name, ok in presence.items() if not ok]
+        if missing:
+            raise ExamConfigMissingFilesError(missing)
+
+        for filename in CONFIG_FILES:
+            if not filename.endswith(".json"):
+                continue
+            raw = await self._config_storage.get_file_bytes(
+                exam_id=command.exam_id,
+                filename=filename,
+            )
+            try:
+                json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError as err:
+                raise ExamConfigInvalidJsonError(filename, err.msg) from err
+
+        exam_id = command.exam_id
+        config_s3_keys = {
+            filename: f"exams/{exam_id}/config/{filename}" for filename in CONFIG_FILES
+        }
+        await self._config_repository.save_exam_config(
+            exam_id=exam_id,
+            config_s3_keys=config_s3_keys,
+        )
+        return ConfirmExamConfigResult(exam_id=exam_id, status="CONFIGURED")

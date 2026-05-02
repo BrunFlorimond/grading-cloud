@@ -29,7 +29,11 @@ class GetExamConfigUploadUrlsUseCase:
     async def execute(
         self, command: GetExamConfigUploadUrlsCommand
     ) -> GetExamConfigUploadUrlsResult:
-        # TODO(#14): verify ownership via self._exam_ownership.verify_teacher_owns_exam
-        # TODO(#14): call self._config_storage.generate_upload_urls(exam_id=command.exam_id)
-        # TODO(#14): return GetExamConfigUploadUrlsResult(upload_urls=...)
-        raise NotImplementedError
+        await self._exam_ownership.verify_teacher_owns_exam(
+            teacher_id=command.teacher_id,
+            exam_id=command.exam_id,
+        )
+        upload_urls = await self._config_storage.generate_upload_urls(
+            exam_id=command.exam_id
+        )
+        return GetExamConfigUploadUrlsResult(upload_urls=upload_urls)

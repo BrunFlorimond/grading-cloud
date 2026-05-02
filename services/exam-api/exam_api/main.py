@@ -40,21 +40,30 @@ async def _lifespan(app: FastAPI):
     if not region:
         raise RuntimeError("Missing AWS_REGION or AWS_DEFAULT_REGION for DynamoDB client.")
     session = aiobotocore.session.get_session()
+    exam_config_bucket = os.getenv("EXAM_CONFIG_BUCKET")
+    if not exam_config_bucket:
+        raise RuntimeError("Missing EXAM_CONFIG_BUCKET configuration.")
     async with session.create_client("dynamodb", region_name=region) as dynamodb_client:
-        app.state.student_invite_service = _build_student_invite_service()
-        app.state.invite_repository = _build_invite_repository()
-        app.state.exam_ownership_repository = _build_exam_ownership_repository(
-            table_name, dynamodb_client
-        )
-        app.state.exam_creation_repository = DynamoDbExamCreationRepository(
-            table_name=table_name,
-            dynamodb_client=dynamodb_client,
-        )
-        app.state.jwt_verifier = _build_jwt_verifier()
-        # TODO(#14): open S3 client via aiobotocore and inject into S3ExamConfigStorage
-        # TODO(#14): app.state.exam_config_storage = _build_exam_config_storage(s3_client)
-        # TODO(#14): app.state.exam_config_repository = DynamoDbExamConfigRepository(table_name=table_name, dynamodb_client=dynamodb_client)
-        yield
+        async with session.create_client("s3", region_name=region) as s3_client:
+            app.state.student_invite_service = _build_student_invite_service()
+            app.state.invite_repository = _build_invite_repository()
+            app.state.exam_ownership_repository = _build_exam_ownership_repository(
+                table_name, dynamodb_client
+            )
+            app.state.exam_creation_repository = DynamoDbExamCreationRepository(
+                table_name=table_name,
+                dynamodb_client=dynamodb_client,
+            )
+            app.state.jwt_verifier = _build_jwt_verifier()
+            app.state.exam_config_storage = S3ExamConfigStorage(
+                bucket_name=exam_config_bucket,
+                s3_client=s3_client,
+            )
+            app.state.exam_config_repository = DynamoDbExamConfigRepository(
+                table_name=table_name,
+                dynamodb_client=dynamodb_client,
+            )
+            yield
 
 
 def _build_student_invite_service() -> CognitoSesStudentInviteAdapter:

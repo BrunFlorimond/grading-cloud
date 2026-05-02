@@ -13,14 +13,14 @@ class ExamConfigStoragePort(Protocol):
     async def generate_upload_urls(self, *, exam_id: str) -> dict[str, str]:
         """Return pre-signed S3 PUT URLs keyed by filename for each config file.
 
-        # TODO(#14): TTL must be 15 minutes; S3 prefix: exams/{exam_id}/config/
+        TTL is 15 minutes; keys use prefix ``exams/{exam_id}/config/``.
         """
         ...
 
     async def get_file_bytes(self, *, exam_id: str, filename: str) -> bytes:
         """Fetch the raw bytes of a config file from S3.
 
-        # TODO(#14): raise ExamConfigMissingFilesError when the S3 object is absent.
+        Raises ``ExamConfigMissingFilesError`` when the object is absent.
         """
         ...
 

@@ -19,9 +19,8 @@ class ExamConfigRepositoryPort(Protocol):
         exam_id: str,
         config_s3_keys: dict[str, str],
     ) -> None:
-        """Persist config S3 keys and advance exam status to CONFIGURED.
+        """Persist config S3 keys and set exam status to CONFIGURED.
 
-        # TODO(#14): ExamStatus.CONFIGURED must be added to grading_shared before implementing.
-        # TODO(#14): Use a DynamoDB conditional update to prevent overwriting a non-existent exam.
+        Uses a conditional update so a missing exam row cannot be created accidentally.
         """
         ...

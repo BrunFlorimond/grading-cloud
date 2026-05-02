@@ -6,12 +6,19 @@ import os
 from typing import Any, Awaitable, Callable, TypeVar
 
 import aiobotocore.session
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
+from exam_api.domain.errors import ExamConfigMissingFilesError
 from exam_api.ports.exam_config_storage_port import CONFIG_FILES
 
 _UPLOAD_URL_TTL_SECONDS = 900  # 15 minutes
 
 T = TypeVar("T")
+
+
+def _is_not_found(err: ClientError) -> bool:
+    code = str(err.response.get("Error", {}).get("Code", ""))
+    return code in {"404", "NoSuchKey", "NotFound"}
 
 
 class S3ExamConfigStorage:
@@ -49,18 +56,55 @@ class S3ExamConfigStorage:
         return f"exams/{exam_id}/config/{filename}"
 
     async def generate_upload_urls(self, *, exam_id: str) -> dict[str, str]:
-        # TODO(#14): for each filename in CONFIG_FILES call client.generate_presigned_url("put_object", Params={Bucket, Key}, ExpiresIn=_UPLOAD_URL_TTL_SECONDS)
-        # TODO(#14): return {filename: presigned_url, ...}
-        raise NotImplementedError
+        urls: dict[str, str] = {}
+
+        async def _run(client: Any) -> None:
+            for filename in CONFIG_FILES:
+                url = await client.generate_presigned_url(
+                    "put_object",
+                    Params={
+                        "Bucket": self._bucket_name,
+                        "Key": self._s3_key(exam_id, filename),
+                    },
+                    ExpiresIn=_UPLOAD_URL_TTL_SECONDS,
+                )
+                urls[filename] = url
+
+        await self._use_client(_run)
+        return urls
 
     async def get_file_bytes(self, *, exam_id: str, filename: str) -> bytes:
-        # TODO(#14): client.get_object(Bucket=self._bucket_name, Key=self._s3_key(exam_id, filename))
-        # TODO(#14): read and return response["Body"].read()
-        # TODO(#14): catch NoSuchKey ClientError → raise ExamConfigMissingFilesError
-        raise NotImplementedError
+        key = self._s3_key(exam_id, filename)
+
+        async def _get(client: Any) -> bytes:
+            try:
+                response = await client.get_object(
+                    Bucket=self._bucket_name,
+                    Key=key,
+                )
+            except ClientError as err:
+                if _is_not_found(err):
+                    raise ExamConfigMissingFilesError([filename]) from err
+                raise
+            body = response["Body"]
+            return await body.read()
+
+        return await self._use_client(_get)
 
     async def all_files_exist(self, *, exam_id: str) -> dict[str, bool]:
-        # TODO(#14): for each filename in CONFIG_FILES, call client.head_object(Bucket=..., Key=...)
-        # TODO(#14): success → True; ClientError with 404/NoSuchKey → False
-        # TODO(#14): return {filename: bool, ...}
-        raise NotImplementedError
+        result: dict[str, bool] = {}
+
+        async def _head_all(client: Any) -> None:
+            for filename in CONFIG_FILES:
+                key = self._s3_key(exam_id, filename)
+                try:
+                    await client.head_object(Bucket=self._bucket_name, Key=key)
+                    result[filename] = True
+                except ClientError as err:
+                    if _is_not_found(err):
+                        result[filename] = False
+                    else:
+                        raise
+
+        await self._use_client(_head_all)
+        return result

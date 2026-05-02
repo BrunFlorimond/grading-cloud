@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.api.invite_router import verify_teacher_exam_ownership
+from exam_api.api.invite_router import (
+    get_exam_ownership_repository,
+    verify_teacher_exam_ownership,
+)
 from exam_api.application.add_students import (
     AddStudentsCommand,
     AddStudentsUseCase,
@@ -22,8 +25,10 @@ from exam_api.domain.errors import (
     DuplicateStudentError,
     EnrollmentExamNotFoundError,
     EnrollmentExamOwnershipError,
+    InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
+from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
 
 router = APIRouter(prefix="/exams", tags=["students"])
@@ -86,10 +91,14 @@ def provide_add_students_use_case(
     repository: Annotated[
         StudentEnrollmentRepositoryPort, Depends(get_enrollment_repository)
     ],
-    # TODO(#15): inject ExamOwnershipPort — wire via request.app.state
+    exam_ownership: Annotated[
+        ExamOwnershipPort, Depends(get_exam_ownership_repository)
+    ],
 ) -> AddStudentsUseCase:
-    # TODO(#15): pass exam_ownership_port once wired
-    raise NotImplementedError
+    return AddStudentsUseCase(
+        enrollment_repository=repository,
+        exam_ownership_port=exam_ownership,
+    )
 
 
 def provide_list_students_use_case(
@@ -112,13 +121,65 @@ def provide_list_students_use_case(
 )
 async def add_students(
     exam_id: str,
-    body: list[StudentInputSchema],
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
     _: Annotated[None, Depends(verify_teacher_exam_ownership)],
+    body: Annotated[list[StudentInputSchema], Field(min_length=1, max_length=50)],
     use_case: Annotated[AddStudentsUseCase, Depends(provide_add_students_use_case)],
 ) -> AddStudentsResponse:
-    # TODO(#15): implement — map body → AddStudentsCommand, handle errors
-    raise NotImplementedError
+    try:
+        result = await use_case.execute(
+            AddStudentsCommand(
+                exam_id=exam_id,
+                teacher_id=current_teacher.teacher_id,
+                students=[
+                    StudentInput(
+                        student_id=s.student_id,
+                        nom=s.nom,
+                        prenom=s.prenom,
+                        classe=s.classe,
+                        email=s.email,
+                    )
+                    for s in body
+                ],
+            )
+        )
+    except StudentBatchTooLargeError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        ) from err
+    except DuplicateStudentError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
+        ) from err
+    except EnrollmentExamNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
+    except EnrollmentExamOwnershipError as err:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": str(err),
+                "code": "exam_ownership",
+            },
+        ) from err
+
+    return AddStudentsResponse(
+        created=[
+            EnrolledStudentSchema(
+                student_id=s.student_id,
+                nom=s.nom,
+                prenom=s.prenom,
+                classe=s.classe,
+                email=s.email,
+                submission_status=s.submission_status.value,
+            )
+            for s in result.created
+        ]
+    )
 
 
 @router.get(
@@ -134,5 +195,32 @@ async def list_students(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> ListStudentsResponse:
-    # TODO(#15): implement — map params → ListExamStudentsCommand, handle errors
-    raise NotImplementedError
+    try:
+        page = await use_case.execute(
+            ListExamStudentsCommand(
+                exam_id=exam_id,
+                teacher_id=current_teacher.teacher_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except InvalidExamListCursorError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        ) from err
+
+    return ListStudentsResponse(
+        items=[
+            EnrolledStudentSchema(
+                student_id=s.student_id,
+                nom=s.nom,
+                prenom=s.prenom,
+                classe=s.classe,
+                email=s.email,
+                submission_status=s.submission_status.value,
+            )
+            for s in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )

@@ -28,7 +28,7 @@ class StudentEnrollmentRepositoryPort(Protocol):
 
         Raises DuplicateStudentError when any student_id already exists in this exam.
         """
-        # TODO(#15): decide whether partial success is allowed or the whole batch is atomic
+        ...
 
     async def list_exam_students(
         self,
@@ -38,3 +38,4 @@ class StudentEnrollmentRepositoryPort(Protocol):
         cursor: str | None,
     ) -> EnrolledStudentPage:
         """Return a paginated list of students enrolled in exam_id."""
+        ...

@@ -102,7 +102,10 @@ class DuplicateStudentError(StudentEnrollmentError):
 class StudentBatchTooLargeError(StudentEnrollmentError):
     """Raised when the batch exceeds the maximum allowed size (50 students)."""
 
-    # TODO(#15): confirm whether 409 or 422 is the right status for this
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(
+            message or "At most 50 students can be added in a single request."
+        )
 
 
 class EnrollmentExamNotFoundError(StudentEnrollmentError):

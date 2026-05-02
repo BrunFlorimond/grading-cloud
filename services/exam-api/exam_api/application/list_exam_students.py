@@ -25,5 +25,8 @@ class ListExamStudentsUseCase:
         self._enrollment_repository = enrollment_repository
 
     async def execute(self, command: ListExamStudentsCommand) -> EnrolledStudentPage:
-        # TODO(#15): implement — ownership check then delegate to repository
-        raise NotImplementedError
+        return await self._enrollment_repository.list_exam_students(
+            exam_id=command.exam_id,
+            limit=command.limit,
+            cursor=command.cursor,
+        )

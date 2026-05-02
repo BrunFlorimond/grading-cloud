@@ -67,7 +67,6 @@ async def _lifespan(app: FastAPI):
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,
             )
-            # TODO(#15): wire student_enrollment_repository once DynamoDbStudentEnrollmentRepository is implemented
             app.state.student_enrollment_repository = DynamoDbStudentEnrollmentRepository(
                 table_name=table_name,
                 dynamodb_client=dynamodb_client,

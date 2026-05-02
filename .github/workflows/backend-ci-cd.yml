@@ -87,12 +87,14 @@ jobs:
         run: |
           uv sync --dev
           uv sync --package exam-api --inexact
+          uv sync --directory infra
 
       - name: Run pytest
         run: |
           set -euo pipefail
-          if [ -d "tests" ] || [ -n "$(ls -1 shared/tests services/*/tests 2>/dev/null || true)" ]; then
-            uv run pytest
+          if [ -d "tests" ] || [ -n "$(ls -1 shared/tests services/*/tests infra/tests 2>/dev/null || true)" ]; then
+            (cd services/exam-api && uv run pytest tests/)
+            (cd infra && uv run pytest tests/)
           else
             echo "No tests found yet. Skipping execution."
           fi

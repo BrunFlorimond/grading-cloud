@@ -9,22 +9,20 @@ class StorageStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # Ephemeral uploads: use keys under exams/tmp/... (S3 lifecycle has no mid-path
+        # wildcards; this prefix covers per-exam scratch under exams/tmp/{exam_id}/).
         self.files_bucket = s3.Bucket(
             self,
             "FilesBucket",
             versioned=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             auto_delete_objects=False,
             removal_policy=RemovalPolicy.RETAIN,
-            # TODO: add encryption=s3.BucketEncryption.S3_MANAGED for AES-256 at rest
-            # TODO: add block_public_access=s3.BlockPublicAccess.BLOCK_ALL
             lifecycle_rules=[
                 s3.LifecycleRule(
                     id="ExpireTemporaryFiles",
-                    # TODO: update prefix to "exams/" and add object_size_greater_than
-                    #       or use a TagFilter to target exams/*/tmp/ objects specifically.
-                    #       CDK lifecycle rules do not support mid-path wildcards; evaluate
-                    #       whether a dedicated "exams-tmp/" prefix convention is acceptable.
-                    prefix="tmp/",
+                    prefix="exams/tmp/",
                     expiration=Duration.days(7),
                     noncurrent_version_expiration=Duration.days(7),
                 )
@@ -45,7 +43,9 @@ class StorageStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
-            # TODO: add point_in_time_recovery=True
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True,
+            ),
         )
 
         self.grading_table.add_global_secondary_index(
@@ -72,12 +72,16 @@ class StorageStack(Stack):
             ),
         )
 
-        # TODO: export bucket name as SSM parameter
-        #   ssm.StringParameter(self, "FilesBucketNameParam",
-        #       parameter_name="/grading/storage/files-bucket-name",
-        #       string_value=self.files_bucket.bucket_name)
+        ssm.StringParameter(
+            self,
+            "FilesBucketNameParam",
+            parameter_name="/grading/storage/files-bucket-name",
+            string_value=self.files_bucket.bucket_name,
+        )
 
-        # TODO: export table name as SSM parameter
-        #   ssm.StringParameter(self, "GradingTableNameParam",
-        #       parameter_name="/grading/storage/grading-table-name",
-        #       string_value=self.grading_table.table_name)
+        ssm.StringParameter(
+            self,
+            "GradingTableNameParam",
+            parameter_name="/grading/storage/grading-table-name",
+            string_value=self.grading_table.table_name,
+        )

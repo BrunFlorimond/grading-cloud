@@ -9,7 +9,7 @@ import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.domain.errors import ExamConfigError, ExamConfigWrongStatusError
+from exam_api.domain.errors import ExamConfigWrongStatusError
 from exam_api.infrastructure.dynamodb_utils import (
     TS_PREFIX,
     ddb_serialize,
@@ -80,33 +80,17 @@ class DynamoDbExamConfigRepository:
         self,
         *,
         exam_id: str,
+        teacher_id: str,
+        created_at: str,
         config_s3_keys: dict[str, str],
     ) -> None:
         configured_value = ExamStatus.CONFIGURED.value
         created_value = ExamStatus.CREATED.value
         keys_attr = ddb_serialize(config_s3_keys)
 
+        ts_sk = f"{TS_PREFIX}{created_at}#{exam_id}"
+
         async def _save(client: Any) -> None:
-            meta_response = await client.get_item(
-                TableName=self._table_name,
-                Key={
-                    "PK": {"S": f"EXAM#{exam_id}"},
-                    "SK": {"S": "METADATA"},
-                },
-                ConsistentRead=True,
-            )
-            meta_item = meta_response.get("Item")
-            if not meta_item:
-                raise ExamConfigError("Exam metadata not found for config save.")
-
-            flat = deserialize_item(meta_item)
-            teacher_id = flat.get("teacher_id")
-            created_at = flat.get("created_at")
-            if not isinstance(teacher_id, str) or not isinstance(created_at, str):
-                raise ValueError("Exam metadata is missing teacher_id or created_at.")
-
-            ts_sk = f"{TS_PREFIX}{created_at}#{exam_id}"
-
             common_values: dict[str, Any] = {
                 ":keys": keys_attr,
                 ":new_status": {"S": configured_value},

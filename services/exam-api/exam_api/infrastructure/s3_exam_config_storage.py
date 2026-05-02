@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any, Awaitable, Callable, TypeVar
 
@@ -99,19 +100,20 @@ class S3ExamConfigStorage:
         return await self._use_client(_get)
 
     async def all_files_exist(self, *, exam_id: str) -> dict[str, bool]:
-        result: dict[str, bool] = {}
+        async def _head_one(client: Any, filename: str) -> tuple[str, bool]:
+            key = self.config_object_key(exam_id=exam_id, filename=filename)
+            try:
+                await client.head_object(Bucket=self._bucket_name, Key=key)
+                return filename, True
+            except ClientError as err:
+                if _is_not_found(err):
+                    return filename, False
+                raise
 
-        async def _head_all(client: Any) -> None:
-            for filename in CONFIG_FILES:
-                key = self.config_object_key(exam_id=exam_id, filename=filename)
-                try:
-                    await client.head_object(Bucket=self._bucket_name, Key=key)
-                    result[filename] = True
-                except ClientError as err:
-                    if _is_not_found(err):
-                        result[filename] = False
-                    else:
-                        raise
+        async def _head_all(client: Any) -> dict[str, bool]:
+            pairs = await asyncio.gather(
+                *[_head_one(client, fn) for fn in CONFIG_FILES]
+            )
+            return dict(pairs)
 
-        await self._use_client(_head_all)
-        return result
+        return await self._use_client(_head_all)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
@@ -19,6 +19,7 @@ from exam_api.application.get_exam_config_upload_urls import (
     PresignedPostBundle,
 )
 from exam_api.domain.errors import (
+    ExamConfigError,
     ExamConfigInvalidJsonError,
     ExamConfigMissingFilesError,
     ExamConfigWrongStatusError,
@@ -42,7 +43,7 @@ class ConfirmConfigResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     exam_id: str
-    status: str  # "CONFIGURED"
+    status: Literal["CONFIGURED"]
 
 
 def get_exam_config_storage(request: Request) -> ExamConfigStoragePort:
@@ -177,5 +178,10 @@ async def confirm_config(
                     "msg": str(err),
                 }
             ],
+        ) from err
+    except ExamConfigError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
         ) from err
     return ConfirmConfigResponse(exam_id=result.exam_id, status=result.status)

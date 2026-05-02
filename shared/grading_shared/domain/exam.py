@@ -24,7 +24,11 @@ class ExamStatus(StrEnum):
 
 _ALLOWED_TRANSITIONS: dict[ExamStatus, set[ExamStatus]] = {
     ExamStatus.CREATED: {ExamStatus.READY, ExamStatus.FAILED, ExamStatus.CONFIGURED},
-    ExamStatus.CONFIGURED: {ExamStatus.READY, ExamStatus.FAILED},
+    ExamStatus.CONFIGURED: {
+        ExamStatus.READY,
+        ExamStatus.FAILED,
+        ExamStatus.CONFIGURED,
+    },
     ExamStatus.DRAFT: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.READY: {ExamStatus.INGESTION_RUNNING, ExamStatus.FAILED},
     ExamStatus.INGESTION_RUNNING: {ExamStatus.CORRECTION_RUNNING, ExamStatus.FAILED},

@@ -410,8 +410,10 @@ async def test_confirm_config_saves_config_s3_keys_to_repository() -> None:
     )
     await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
 
-    keys_arg = repo.save_exam_config.await_args.kwargs["config_s3_keys"]
-    assert keys_arg["devoir.json"] == "exams/e1/config/devoir.json"
+    kwargs = repo.save_exam_config.await_args.kwargs
+    assert kwargs["teacher_id"] == "t1"
+    assert kwargs["created_at"] == "2026-05-01T12:00:00.000000Z"
+    assert kwargs["config_s3_keys"]["devoir.json"] == "exams/e1/config/devoir.json"
 
 
 @pytest.mark.asyncio
@@ -607,26 +609,17 @@ async def test_save_exam_config_updates_dynamodb_metadata_with_s3_keys_and_confi
     None
 ):
     client = AsyncMock()
-    client.get_item = AsyncMock(
-        return_value={
-            "Item": {
-                "PK": {"S": "EXAM#e1"},
-                "SK": {"S": "METADATA"},
-                "teacher_id": {"S": "t1"},
-                "title": {"S": "T"},
-                "status": {"S": ExamStatus.CREATED.value},
-                "created_at": {"S": "2026-05-01T12:00:00.000000Z"},
-            }
-        }
-    )
     client.transact_write_items = AsyncMock()
     repo = DynamoDbExamConfigRepository(table_name="grading", dynamodb_client=client)
 
     await repo.save_exam_config(
         exam_id="e1",
+        teacher_id="t1",
+        created_at="2026-05-01T12:00:00.000000Z",
         config_s3_keys={"devoir.json": "exams/e1/config/devoir.json"},
     )
 
+    assert client.get_item.await_count == 0
     assert client.transact_write_items.await_count == 1
     items = client.transact_write_items.await_args.kwargs["TransactItems"]
     assert len(items) == 3
@@ -640,23 +633,13 @@ async def test_save_exam_config_updates_dynamodb_metadata_with_s3_keys_and_confi
 @pytest.mark.asyncio
 async def test_save_exam_config_uses_conditional_expression_to_prevent_phantom_writes() -> None:
     client = AsyncMock()
-    client.get_item = AsyncMock(
-        return_value={
-            "Item": {
-                "PK": {"S": "EXAM#e1"},
-                "SK": {"S": "METADATA"},
-                "teacher_id": {"S": "t1"},
-                "title": {"S": "T"},
-                "status": {"S": ExamStatus.CREATED.value},
-                "created_at": {"S": "2026-05-01T12:00:00.000000Z"},
-            }
-        }
-    )
     client.transact_write_items = AsyncMock()
     repo = DynamoDbExamConfigRepository(table_name="grading", dynamodb_client=client)
 
     await repo.save_exam_config(
         exam_id="e1",
+        teacher_id="t1",
+        created_at="2026-05-01T12:00:00.000000Z",
         config_s3_keys={"devoir.json": "exams/e1/config/devoir.json"},
     )
 
@@ -666,6 +649,29 @@ async def test_save_exam_config_uses_conditional_expression_to_prevent_phantom_w
     )
     for entry in items:
         assert entry["Update"]["ConditionExpression"] == expected
+
+
+@pytest.mark.asyncio
+async def test_save_exam_config_raises_wrong_status_on_transaction_cancelled() -> None:
+    client = AsyncMock()
+    client.transact_write_items = AsyncMock(
+        side_effect=ClientError(
+            {
+                "Error": {"Code": "TransactionCanceledException", "Message": "tx"},
+                "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
+            },
+            "TransactWriteItems",
+        )
+    )
+    repo = DynamoDbExamConfigRepository(table_name="grading", dynamodb_client=client)
+
+    with pytest.raises(ExamConfigWrongStatusError):
+        await repo.save_exam_config(
+            exam_id="e1",
+            teacher_id="t1",
+            created_at="2026-05-01T12:00:00.000000Z",
+            config_s3_keys={"devoir.json": "exams/e1/config/devoir.json"},
+        )
 
 
 # --- config_router (TestClient) ---

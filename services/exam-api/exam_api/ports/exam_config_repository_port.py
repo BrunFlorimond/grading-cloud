@@ -17,10 +17,14 @@ class ExamConfigRepositoryPort(Protocol):
         self,
         *,
         exam_id: str,
+        teacher_id: str,
+        created_at: str,
         config_s3_keys: dict[str, str],
     ) -> None:
         """Persist config S3 keys and set exam status to CONFIGURED.
 
-        Uses a conditional update so a missing exam row cannot be created accidentally.
+        ``teacher_id`` and ``created_at`` must match the exam loaded by the caller (avoids a
+        redundant DynamoDB read). Uses conditional updates so phantom writes and stale-status
+        races fail cleanly.
         """
         ...

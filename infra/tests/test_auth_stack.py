@@ -92,14 +92,14 @@ def test_user_pool_custom_role_attribute(template: assertions.Template) -> None:
 def test_teachers_group_exists(template: assertions.Template) -> None:
     template.has_resource_properties(
         "AWS::Cognito::UserPoolGroup",
-        {"GroupName": "Teachers"},
+        {"GroupName": "teachers"},
     )
 
 
 def test_students_group_exists(template: assertions.Template) -> None:
     template.has_resource_properties(
         "AWS::Cognito::UserPoolGroup",
-        {"GroupName": "Students"},
+        {"GroupName": "students"},
     )
 
 
@@ -149,6 +149,16 @@ def test_jwt_authorizer_uses_cognito_issuer(template: assertions.Template) -> No
                     "Audience": assertions.Match.any_value(),
                 }
             ),
+        },
+    )
+
+
+def test_jwt_authorizer_enforced_on_route(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::ApiGatewayV2::Route",
+        {
+            "AuthorizationType": "JWT",
+            "RouteKey": "GET /auth-probe",
         },
     )
 

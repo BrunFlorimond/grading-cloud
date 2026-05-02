@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, Stack
+from aws_cdk import CfnOutput, Fn, Stack
 from aws_cdk import aws_apigatewayv2 as apigatewayv2
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ssm as ssm
@@ -10,6 +10,8 @@ class AuthStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # custom:role is set by application code (e.g. AdminUpdateUserAttributes) at
+        # teacher/student invitation — not by Cognito triggers in this stack.
         user_pool = cognito.UserPool(
             self,
             "GradingUserPool",
@@ -39,7 +41,7 @@ class AuthStack(Stack):
             self,
             "TeachersGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="Teachers",
+            group_name="teachers",
             description="Teacher users for grading platform.",
         )
 
@@ -47,7 +49,7 @@ class AuthStack(Stack):
             self,
             "StudentsGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="Students",
+            group_name="students",
             description="Student users for grading platform.",
         )
 
@@ -80,6 +82,28 @@ class AuthStack(Stack):
                 audience=[user_pool_client.user_pool_client_id],
                 issuer=user_pool.user_pool_provider_url,
             ),
+        )
+
+        # HTTP proxy to a public echo URL so at least one route enforces the JWT authorizer
+        # (no backend Lambda in this stack; replace with service integration later).
+        auth_probe_integration = apigatewayv2.CfnIntegration(
+            self,
+            "AuthProbeHttpProxy",
+            api_id=http_api.ref,
+            integration_type="HTTP_PROXY",
+            integration_method="GET",
+            integration_uri="https://httpbin.org/get",
+            payload_format_version="1.0",
+        )
+
+        apigatewayv2.CfnRoute(
+            self,
+            "AuthProbeRoute",
+            api_id=http_api.ref,
+            route_key="GET /auth-probe",
+            authorization_type="JWT",
+            authorizer_id=jwt_authorizer.ref,
+            target=Fn.join("", ["integrations/", auth_probe_integration.ref]),
         )
 
         CfnOutput(

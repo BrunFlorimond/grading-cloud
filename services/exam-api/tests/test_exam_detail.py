@@ -450,7 +450,7 @@ def exam_detail_api_client() -> TestClient:
     jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "token_use": "id",
         },
     )
@@ -557,7 +557,7 @@ def student_statuses_api_client() -> TestClient:
     jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "token_use": "id",
         },
     )

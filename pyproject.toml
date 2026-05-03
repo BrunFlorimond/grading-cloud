@@ -6,10 +6,16 @@ requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["shared", "services/*"]
+members = ["shared", "services/*", "infra"]
+
+[tool.uv.sources]
+exam-api = { workspace = true }
+grading-infra = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "exam-api",
+    "grading-infra",
     "mypy>=1.20.2",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
@@ -17,4 +23,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["services/exam-api/tests"]
+# Two `tests/` packages (exam-api + infra): avoid `tests.*` import clashes.
+addopts = "--import-mode=importlib"
+testpaths = ["services/exam-api/tests", "infra/tests"]

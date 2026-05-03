@@ -8,9 +8,10 @@
 @baseUrl = http://localhost:8000
 
 # ---------------------------------------------------------------------------
-# After running "Login Teacher", copy the id_token here so all subsequent
-# requests that need @teacherToken work without re-running the login each time.
+# Register teacher: use an admin user's id_token (user must belong to Cognito group "admin").
+# After running "Login Teacher", copy the id_token into @teacherToken for teacher APIs.
 # ---------------------------------------------------------------------------
+@adminToken  = PASTE_ADMIN_ID_TOKEN_HERE
 @teacherToken = PASTE_ID_TOKEN_FROM_LOGIN_RESPONSE
 @examId       = PASTE_EXAM_ID_HERE
 @studentId    = PASTE_STUDENT_ID_HERE
@@ -20,9 +21,10 @@
 # AUTH
 # ===========================================================================
 
-### Register Teacher — 201 Created
+### Register Teacher — 201 Created (requires Cognito group "admin")
 # @name registerTeacher
 POST {{baseUrl}}/auth/register
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -35,6 +37,7 @@ Content-Type: application/json
 
 ### Register Teacher — 409 Conflict (duplicate email)
 POST {{baseUrl}}/auth/register
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -47,6 +50,7 @@ Content-Type: application/json
 
 ### Register Teacher — 400 Bad Request (weak password)
 POST {{baseUrl}}/auth/register
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {

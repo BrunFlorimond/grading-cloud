@@ -19,9 +19,11 @@ from exam_api.application.register_teacher import (
     RegisterTeacherCommand,
     RegisterTeacherUseCase,
 )
+from exam_api.api.dependencies import CurrentAdmin, require_admin
 from exam_api.domain.errors import (
     DuplicateEmailError,
     InvalidCredentialsError,
+    TeacherGroupAssignmentError,
     WeakPasswordError,
 )
 from exam_api.infrastructure.cognito_auth_adapter import CognitoAuthAdapter
@@ -85,6 +87,7 @@ def get_login_use_case() -> LoginTeacherUseCase:
 )
 async def register(
     body: RegisterRequest,
+    _: Annotated[CurrentAdmin, Depends(require_admin)],
     use_case: Annotated[RegisterTeacherUseCase, Depends(get_register_use_case)],
 ) -> RegisterResponse:
     try:
@@ -104,6 +107,11 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(err) or "Password does not meet the required policy.",
+        ) from err
+    except TeacherGroupAssignmentError as err:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(err) or "Teacher registration could not be completed.",
         ) from err
 
     return RegisterResponse(

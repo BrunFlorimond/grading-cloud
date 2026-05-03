@@ -5,13 +5,18 @@ from aws_cdk import aws_ssm as ssm
 
 from constructs import Construct
 
+from stacks.constants import (
+    COGNITO_ADMIN_GROUP,
+    COGNITO_STUDENT_GROUP,
+    COGNITO_TEACHER_GROUP,
+)
+
 
 class AuthStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # custom:role is set by application code (e.g. AdminUpdateUserAttributes) at
-        # teacher/student invitation — not by Cognito triggers in this stack.
+        # RBAC uses Cognito pool groups (teachers / students / admin) on the ID token.
         user_pool = cognito.UserPool(
             self,
             "GradingUserPool",
@@ -21,13 +26,6 @@ class AuthStack(Stack):
             standard_attributes=cognito.StandardAttributes(
                 email=cognito.StandardAttribute(required=True, mutable=False),
             ),
-            custom_attributes={
-                "role": cognito.StringAttribute(
-                    min_len=7,
-                    max_len=7,
-                    mutable=True,
-                ),
-            },
             password_policy=cognito.PasswordPolicy(
                 min_length=8,
                 require_uppercase=True,
@@ -41,7 +39,7 @@ class AuthStack(Stack):
             self,
             "TeachersGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="teachers",
+            group_name=COGNITO_TEACHER_GROUP,
             description="Teacher users for grading platform.",
         )
 
@@ -49,8 +47,16 @@ class AuthStack(Stack):
             self,
             "StudentsGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="students",
+            group_name=COGNITO_STUDENT_GROUP,
             description="Student users for grading platform.",
+        )
+
+        cognito.CfnUserPoolGroup(
+            self,
+            "AdminGroup",
+            user_pool_id=user_pool.user_pool_id,
+            group_name=COGNITO_ADMIN_GROUP,
+            description="Administrators who may register new teachers via the API.",
         )
 
         user_pool_client = user_pool.add_client(

@@ -25,8 +25,7 @@ class StudentInviteServicePort(Protocol):
         """Create (or retrieve) a Cognito student account and send invitation email via SES.
 
         - If the student already exists in Cognito: resend the email, do NOT recreate account.
-        - Cognito user must be added to the `students` group.
-        - Cognito custom attributes: `custom:role=student`.
+        - Cognito user must be added to the `students` group (ID token carries cognito:groups).
         - TODO(#10): decide on MessageAction=SUPPRESS + custom SES email vs. Cognito built-in.
         """
         ...

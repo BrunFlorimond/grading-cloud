@@ -143,7 +143,7 @@ Two roles, enforced by Cognito groups and FastAPI dependencies:
 | **Teacher** | Create exams, upload config + spreadsheets, manage student roster, trigger pipeline, view all results for their exams, download all PDFs |
 | **Student** | Upload their own spreadsheet, view their own grade breakdown, download their own PDF |
 
-Students are scoped by DynamoDB mappings: student-facing endpoints require a JWT with `custom:role=student` and a matching `sub`, then validate that `PK=EXAM#{exam_id}` and `SK=STUDENT#{sub}` exists.
+Students are scoped by DynamoDB mappings: student-facing endpoints require a JWT whose `cognito:groups` includes `students` and a matching `sub`, then validate that `PK=EXAM#{exam_id}` and `SK=STUDENT#{sub}` exists.
 
 ---
 

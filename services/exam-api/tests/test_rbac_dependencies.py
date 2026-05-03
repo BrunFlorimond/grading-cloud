@@ -12,8 +12,10 @@ from httpx import HTTPError
 from jose import JWTError
 
 from exam_api.api.dependencies import (
+    CurrentAdmin,
     CurrentStudent,
     CurrentTeacher,
+    require_admin,
     require_own_data,
     require_student,
     require_teacher,
@@ -50,6 +52,12 @@ def rbac_app() -> FastAPI:
     ) -> dict[str, str]:
         return {"role": "student"}
 
+    @app.get("/admin-only")
+    async def admin_route(
+        _: Annotated[CurrentAdmin, Depends(require_admin)],
+    ) -> dict[str, str]:
+        return {"role": "admin"}
+
     @app.get("/exams/{exam_id}/students/{student_id}/mine")
     async def own_route(
         _: Annotated[None, Depends(require_own_data("student_id"))],
@@ -68,7 +76,7 @@ def test_require_teacher_returns_current_teacher(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "t1", "custom:role": "teacher"}
+        return_value={"sub": "t1", "cognito:groups": ["teachers"]}
     )
     response = rbac_client.get("/teacher-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 200
@@ -104,14 +112,14 @@ def test_require_teacher_403_student_role(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "x", "custom:role": "student"}
+        return_value={"sub": "x", "cognito:groups": ["students"]}
     )
     response = rbac_client.get("/teacher-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 403
     assert response.json()["code"] == "insufficient_role"
 
 
-def test_require_teacher_403_missing_role(
+def test_require_teacher_403_missing_teacher_group(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
@@ -122,11 +130,51 @@ def test_require_teacher_403_missing_role(
     assert response.json()["code"] == "insufficient_role"
 
 
+def test_require_admin_returns_when_group_present(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "a1", "cognito:groups": ["admin"]}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 200
+    assert response.json() == {"role": "admin"}
+
+
+def test_require_admin_403_without_admin_group(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "t", "cognito:groups": ["teachers"]}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_role"
+
+
+def test_require_admin_403_missing_groups_claim(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "x"}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_role"
+
+
+def test_require_admin_401_missing_auth(rbac_client: TestClient) -> None:
+    response = rbac_client.get("/admin-only")
+    assert response.status_code == 401
+    body = response.json()
+    assert body["code"] == "missing_token"
+
+
 def test_require_student_returns_current_student(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "s1", "custom:role": "student"}
+        return_value={"sub": "s1", "cognito:groups": ["students"]}
     )
     response = rbac_client.get("/student-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 200
@@ -160,13 +208,13 @@ def test_require_student_403_teacher_role(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "t", "custom:role": "teacher"}
+        return_value={"sub": "t", "cognito:groups": ["teachers"]}
     )
     response = rbac_client.get("/student-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 403
 
 
-def test_require_student_403_missing_role(
+def test_require_student_403_missing_student_group(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
@@ -178,7 +226,7 @@ def test_require_student_403_missing_role(
 
 def test_require_own_data_passes(rbac_app: FastAPI, rbac_client: TestClient) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "student-a", "custom:role": "student"}
+        return_value={"sub": "student-a", "cognito:groups": ["students"]}
     )
     response = rbac_client.get(
         "/exams/e1/students/student-a/mine",
@@ -192,7 +240,7 @@ def test_require_own_data_403_mismatch(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "student-a", "custom:role": "student"}
+        return_value={"sub": "student-a", "cognito:groups": ["students"]}
     )
     response = rbac_client.get(
         "/exams/e1/students/other/mine",

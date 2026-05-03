@@ -6,7 +6,7 @@ test_dynamodb_invite_repository.py, and test_invite_student.py.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from fastapi import FastAPI
@@ -17,11 +17,17 @@ from exam_api.application.login_teacher import LoginTeacherResult
 from exam_api.application.register_teacher import RegisterTeacherResult
 from exam_api.domain.teacher import Teacher
 from exam_api.ports.auth_service_port import AuthTokens
+from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 
 @pytest.fixture
 def auth_client() -> TestClient:
     app = FastAPI()
+    jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
+    jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "admin", "cognito:groups": ["admin"]}
+    )
+    app.state.jwt_verifier = jwt_verifier
     app.include_router(router)
     test_client = TestClient(app)
     try:
@@ -45,6 +51,7 @@ def test_register_endpoint_uses_async_execute(auth_client: TestClient) -> None:
 
     response = auth_client.post(
         "/auth/register",
+        headers={"Authorization": "Bearer x"},
         json={"email": "t@example.com", "password": "StrongPassword123!", "full_name": "T"},
     )
 

@@ -11,7 +11,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "exam-api",
 ]
+
+[tool.uv.sources]
+exam-api = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

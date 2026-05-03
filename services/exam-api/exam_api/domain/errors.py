@@ -15,6 +15,10 @@ class WeakPasswordError(AuthError):
     """Raised when a teacher password does not match policy constraints."""
 
 
+class TeacherGroupAssignmentError(AuthError):
+    """Raised when Cognito user creation succeeded but teachers group assignment failed."""
+
+
 class InvalidCredentialsError(AuthError):
     """Raised when login credentials are invalid."""
 

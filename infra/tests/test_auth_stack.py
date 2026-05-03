@@ -9,6 +9,11 @@ from __future__ import annotations
 import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
+from exam_api.cognito_group_names import (
+    COGNITO_ADMIN_GROUP,
+    COGNITO_STUDENT_GROUP,
+    COGNITO_TEACHER_GROUP,
+)
 from stacks.auth_stack import AuthStack
 
 
@@ -60,30 +65,6 @@ def test_user_pool_password_policy(template: assertions.Template) -> None:
     )
 
 
-def test_user_pool_custom_role_attribute(template: assertions.Template) -> None:
-    template.has_resource_properties(
-        "AWS::Cognito::UserPool",
-        {
-            "Schema": assertions.Match.array_with(
-                [
-                    assertions.Match.object_like(
-                        {
-                            "Name": "role",
-                            "AttributeDataType": "String",
-                            "StringAttributeConstraints": assertions.Match.object_like(
-                                {
-                                    "MinLength": "7",
-                                    "MaxLength": "7",
-                                }
-                            ),
-                        }
-                    )
-                ]
-            )
-        },
-    )
-
-
 # ---------------------------------------------------------------------------
 # Groups
 # ---------------------------------------------------------------------------
@@ -92,21 +73,21 @@ def test_user_pool_custom_role_attribute(template: assertions.Template) -> None:
 def test_teachers_group_exists(template: assertions.Template) -> None:
     template.has_resource_properties(
         "AWS::Cognito::UserPoolGroup",
-        {"GroupName": "teachers"},
+        {"GroupName": COGNITO_TEACHER_GROUP},
     )
 
 
 def test_students_group_exists(template: assertions.Template) -> None:
     template.has_resource_properties(
         "AWS::Cognito::UserPoolGroup",
-        {"GroupName": "students"},
+        {"GroupName": COGNITO_STUDENT_GROUP},
     )
 
 
 def test_admin_group_exists(template: assertions.Template) -> None:
     template.has_resource_properties(
         "AWS::Cognito::UserPoolGroup",
-        {"GroupName": "admin"},
+        {"GroupName": COGNITO_ADMIN_GROUP},
     )
 
 

@@ -152,6 +152,24 @@ def test_require_admin_403_without_admin_group(
     assert response.json()["code"] == "insufficient_role"
 
 
+def test_require_admin_403_missing_groups_claim(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "x"}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_role"
+
+
+def test_require_admin_401_missing_auth(rbac_client: TestClient) -> None:
+    response = rbac_client.get("/admin-only")
+    assert response.status_code == 401
+    body = response.json()
+    assert body["code"] == "missing_token"
+
+
 def test_require_student_returns_current_student(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:

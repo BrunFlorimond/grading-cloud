@@ -30,6 +30,7 @@ from exam_api.application.register_teacher import (
 from exam_api.domain.errors import (
     DuplicateEmailError,
     InvalidCredentialsError,
+    TeacherGroupAssignmentError,
     WeakPasswordError,
 )
 from exam_api.cognito_group_names import COGNITO_TEACHER_GROUP
@@ -181,6 +182,7 @@ async def test_cognito_register_admin_creates_user_sets_password_adds_to_group()
     )
     cognito.admin_set_user_password = AsyncMock()
     cognito.admin_add_user_to_group = AsyncMock()
+    cognito.admin_delete_user = AsyncMock()
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
         client_id="app-client-id",
@@ -257,6 +259,7 @@ async def test_cognito_register_maps_invalid_password_to_weak_password() -> None
             "Password should contain special characters",
         )
     )
+    cognito.admin_delete_user = AsyncMock()
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
         client_id="app-client-id",
@@ -269,6 +272,63 @@ async def test_cognito_register_maps_invalid_password_to_weak_password() -> None
             password="weak",
             full_name="Ada Lovelace",
         )
+
+    cognito.admin_delete_user.assert_awaited_once_with(
+        UserPoolId="pool-id",
+        Username="teacher@example.com",
+    )
+
+
+@pytest.mark.asyncio
+async def test_cognito_register_group_assignment_failure_deletes_user() -> None:
+    cognito = Mock()
+    cognito.admin_create_user = AsyncMock(
+        return_value={
+            "User": {
+                "Attributes": [
+                    {"Name": "sub", "Value": "teacher-sub-uuid"},
+                ],
+            },
+        }
+    )
+    cognito.admin_set_user_password = AsyncMock()
+    cognito.admin_add_user_to_group = AsyncMock(
+        side_effect=_make_client_error(
+            "LimitExceededException",
+            "Too many requests",
+        )
+    )
+    cognito.admin_delete_user = AsyncMock()
+    adapter = CognitoAuthAdapter(
+        user_pool_id="pool-id",
+        client_id="app-client-id",
+        client=cognito,
+    )
+
+    with pytest.raises(TeacherGroupAssignmentError):
+        await adapter.register_teacher(
+            email="teacher@example.com",
+            password="StrongPassword123!",
+            full_name="Ada Lovelace",
+        )
+
+    cognito.admin_delete_user.assert_awaited_once_with(
+        UserPoolId="pool-id",
+        Username="teacher@example.com",
+    )
+
+
+def test_generate_internal_temporary_password_randomized_and_complex() -> None:
+    seen: set[str] = set()
+    for _ in range(30):
+        pwd = CognitoAuthAdapter._generate_internal_temporary_password(24)
+        assert len(pwd) == 24
+        assert any(c.isupper() for c in pwd)
+        assert any(c.islower() for c in pwd)
+        assert any(c.isdigit() for c in pwd)
+        assert any(c in "!@#$%^&*()-_=+" for c in pwd)
+        seen.add(pwd)
+    assert len(seen) > 1
 
 
 @pytest.mark.asyncio
@@ -441,6 +501,31 @@ def test_post_register_400_weak_password(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Password too weak"
+
+
+def test_post_register_503_teacher_group_assignment_failed(client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock(
+        side_effect=TeacherGroupAssignmentError(
+            "Could not assign the new teacher to the teachers group."
+        )
+    )
+    client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
+
+    response = client.post(
+        "/auth/register",
+        headers={"Authorization": "Bearer admin-token"},
+        json={
+            "email": "teacher@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "Ada Lovelace",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Could not assign the new teacher to the teachers group."
+    )
 
 
 def test_post_login_200_returns_tokens(client: TestClient) -> None:

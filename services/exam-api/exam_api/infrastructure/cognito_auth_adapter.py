@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from exam_api.domain.errors import (
     DuplicateEmailError,
     InvalidCredentialsError,
+    TeacherGroupAssignmentError,
     WeakPasswordError,
 )
 from exam_api.cognito_group_names import COGNITO_TEACHER_GROUP
@@ -92,17 +93,24 @@ class CognitoAuthAdapter(AuthServicePort):
         except ClientError as err:
             error_code = self._extract_error_code(err)
             if error_code == "InvalidPasswordException":
+                await self._admin_delete_user_best_effort(client, email)
                 message = err.response.get("Error", {}).get(
                     "Message", "Password does not meet the required policy."
                 )
                 raise WeakPasswordError(message) from err
             raise
 
-        await client.admin_add_user_to_group(
-            UserPoolId=self._user_pool_id,
-            Username=email,
-            GroupName=COGNITO_TEACHER_GROUP,
-        )
+        try:
+            await client.admin_add_user_to_group(
+                UserPoolId=self._user_pool_id,
+                Username=email,
+                GroupName=COGNITO_TEACHER_GROUP,
+            )
+        except ClientError as err:
+            await self._admin_delete_user_best_effort(client, email)
+            raise TeacherGroupAssignmentError(
+                "Could not assign the new teacher to the teachers group."
+            ) from err
         user_payload = create_response.get("User", {})
         return self._extract_user_sub(user_payload, email)
 
@@ -127,9 +135,32 @@ class CognitoAuthAdapter(AuthServicePort):
 
     @staticmethod
     def _generate_internal_temporary_password(length: int = 20) -> str:
+        """Random temporary password satisfying typical Cognito complexity (mixed classes)."""
+        if length < 8:
+            raise ValueError("temporary password length must be at least 8")
+        rng = secrets.SystemRandom()
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
-        body = "".join(secrets.choice(alphabet) for _ in range(length))
-        return f"Aa1!{body}"
+        symbol_alphabet = "!@#$%^&*()-_=+"
+        required: list[str] = [
+            rng.choice(string.ascii_uppercase),
+            rng.choice(string.ascii_lowercase),
+            rng.choice(string.digits),
+            rng.choice(symbol_alphabet),
+        ]
+        remaining = length - len(required)
+        chars = required + [rng.choice(alphabet) for _ in range(remaining)]
+        rng.shuffle(chars)
+        return "".join(chars)
+
+    async def _admin_delete_user_best_effort(self, client: Any, username: str) -> None:
+        """Remove a user after a failed provisioning step; ignores delete errors."""
+        try:
+            await client.admin_delete_user(
+                UserPoolId=self._user_pool_id,
+                Username=username,
+            )
+        except ClientError:
+            pass
 
     async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
         if self._injected_client is not None:

@@ -1,3 +1,6 @@
+# Local secrets and env files
+.env
+
 # Local AI agent configuration (do not commit)
 Agent.md
 .claude/agents/

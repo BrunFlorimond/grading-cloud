@@ -1,0 +1,345 @@
+# exam-api — REST Client test suite
+# Run each request individually with "Send Request" (Ctrl+Alt+R)
+# Requests are ordered as a realistic flow: register → login → exam lifecycle → students
+#
+# Prerequisites:
+#   uv run uvicorn exam_api.main:app --host 0.0.0.0 --port 8000
+
+@baseUrl = http://localhost:8000
+
+# ---------------------------------------------------------------------------
+# After running "Login Teacher", copy the id_token here so all subsequent
+# requests that need @teacherToken work without re-running the login each time.
+# ---------------------------------------------------------------------------
+@teacherToken = PASTE_ID_TOKEN_FROM_LOGIN_RESPONSE
+@examId       = PASTE_EXAM_ID_HERE
+@studentId    = PASTE_STUDENT_ID_HERE
+
+
+# ===========================================================================
+# AUTH
+# ===========================================================================
+
+### Register Teacher — 201 Created
+# @name registerTeacher
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "teacher@example.com",
+  "password": "Teacher123",
+  "full_name": "Alice Dupont"
+}
+
+###
+
+### Register Teacher — 409 Conflict (duplicate email)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "teacher@example.com",
+  "password": "Teacher123",
+  "full_name": "Alice Dupont"
+}
+
+###
+
+### Register Teacher — 400 Bad Request (weak password)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "teacher1@example.com",
+  "password": "weak",
+  "full_name": "Bob Martin"
+}
+
+###
+
+### Login Teacher — 200 OK  →  copy id_token into @teacherToken above
+# @name loginTeacher
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "teacher@example.com",
+  "password": "Teacher123"
+}
+
+###
+
+### Login Teacher — 401 Unauthorized (wrong password)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "teacher@example.com",
+  "password": "WrongPassword1"
+}
+
+###
+
+### Student Login — 200 OK with tokens (already set password) OR challenge
+# @name studentLogin
+# Run after a student has been invited and a password has been set.
+POST {{baseUrl}}/auth/student-login
+Content-Type: application/json
+
+{
+  "email": "student@example.com",
+  "password": "Student456!"
+}
+
+###
+
+### Change Student Password — 200 OK (complete NEW_PASSWORD_REQUIRED challenge)
+# Use session returned by student-login when challenge_name = "NEW_PASSWORD_REQUIRED"
+POST {{baseUrl}}/auth/change-password
+Content-Type: application/json
+
+{
+  "email": "student@example.com",
+  "session": "PASTE_SESSION_FROM_CHALLENGE_HERE",
+  "new_password": "NewPass456!"
+}
+
+
+# ===========================================================================
+# EXAMS
+# ===========================================================================
+
+### Create Exam — 201 Created  →  copy exam_id into @examId above
+# @name createExam
+POST {{baseUrl}}/exams
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+{
+  "title": "Mathématiques — Terminale S1",
+  "description": "Contrôle final du semestre",
+  "subject": "Mathématiques"
+}
+
+###
+
+### Create Exam — minimal (no optional fields) — 201 Created
+POST {{baseUrl}}/exams
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+{
+  "title": "DS Physique"
+}
+
+###
+
+### Create Exam — 401 Unauthorized (no token)
+POST {{baseUrl}}/exams
+Content-Type: application/json
+
+{
+  "title": "Sans token"
+}
+
+###
+
+### Create Exam — 422 Unprocessable (empty title)
+POST {{baseUrl}}/exams
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+{
+  "title": ""
+}
+
+###
+
+### List Exams — 200 OK (first page)
+GET {{baseUrl}}/exams
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### List Exams — with pagination (limit=5)
+GET {{baseUrl}}/exams?limit=5
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### List Exams — with cursor (paste next_cursor from previous response)
+GET {{baseUrl}}/exams?limit=5&cursor=PASTE_CURSOR_HERE
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### Get Exam Detail — 200 OK
+GET {{baseUrl}}/exams/{{examId}}
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### Get Exam Detail — 404 Not Found (unknown exam)
+GET {{baseUrl}}/exams/exam-does-not-exist-000
+Authorization: Bearer {{teacherToken}}
+
+
+# ===========================================================================
+# EXAM CONFIG
+# ===========================================================================
+
+### Get Config Upload URLs — 200 OK (presigned S3 POST URLs)
+# Returns upload_urls with fields + url for multipart form upload to S3.
+# @name getUploadUrls
+POST {{baseUrl}}/exams/{{examId}}/config/upload-urls
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### Get Config Upload URLs — 404 Not Found (wrong exam)
+POST {{baseUrl}}/exams/exam-does-not-exist-000/config/upload-urls
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### Confirm Config — 200 OK → status becomes CONFIGURED
+# Only succeeds after the required config files have actually been uploaded to S3
+# via the presigned URLs obtained above.
+POST {{baseUrl}}/exams/{{examId}}/config/confirm
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### Confirm Config — 422 Unprocessable (files not uploaded yet)
+# Expected to fail with missing_config_files when S3 objects are absent.
+POST {{baseUrl}}/exams/{{examId}}/config/confirm
+Authorization: Bearer {{teacherToken}}
+
+
+# ===========================================================================
+# STUDENTS — enrollment
+# ===========================================================================
+
+### Add Students — 201 Created  →  copy student_id into @studentId above
+# @name addStudents
+POST {{baseUrl}}/exams/{{examId}}/students
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+[
+  {
+    "nom": "Durand",
+    "prenom": "Claire",
+    "classe": "TES1",
+    "email": "claire.durand@lycee.fr"
+  },
+  {
+    "nom": "Martin",
+    "prenom": "Hugo",
+    "classe": "TES1",
+    "email": null
+  }
+]
+
+###
+
+### Add Students — with explicit student_id
+POST {{baseUrl}}/exams/{{examId}}/students
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+[
+  {
+    "student_id": "2024-TSI-042",
+    "nom": "Petit",
+    "prenom": "Lucas",
+    "classe": "TSI2"
+  }
+]
+
+###
+
+### Add Students — 409 Conflict (duplicate student_id)
+POST {{baseUrl}}/exams/{{examId}}/students
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+[
+  {
+    "student_id": "2024-TSI-042",
+    "nom": "Petit",
+    "prenom": "Lucas",
+    "classe": "TSI2"
+  }
+]
+
+###
+
+### Add Students — 422 Unprocessable (empty body list)
+POST {{baseUrl}}/exams/{{examId}}/students
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+[]
+
+###
+
+### Add Students — 401 Unauthorized (no token)
+POST {{baseUrl}}/exams/{{examId}}/students
+Content-Type: application/json
+
+[
+  { "nom": "Test", "prenom": "Sans", "classe": "X" }
+]
+
+###
+
+### List Students — 200 OK (first page)
+GET {{baseUrl}}/exams/{{examId}}/students
+Authorization: Bearer {{teacherToken}}
+
+###
+
+### List Students — with pagination
+GET {{baseUrl}}/exams/{{examId}}/students?limit=1
+Authorization: Bearer {{teacherToken}}
+
+
+# ===========================================================================
+# STUDENTS — invite
+# ===========================================================================
+
+### Invite Student — 200 OK (sends Cognito email + sets scope in DynamoDB)
+# Requires SES identity verified for SES_FROM_ADDRESS.
+# student_id must be a Cognito user sub (UUID) — use the sub from add_students response.
+POST {{baseUrl}}/exams/{{examId}}/students/{{studentId}}/invite
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+{
+  "student_email": "claire.durand@lycee.fr"
+}
+
+###
+
+### Invite Student — 404 Not Found (exam not owned by this teacher)
+POST {{baseUrl}}/exams/exam-does-not-exist-000/students/{{studentId}}/invite
+Content-Type: application/json
+Authorization: Bearer {{teacherToken}}
+
+{
+  "student_email": "claire.durand@lycee.fr"
+}
+
+###
+
+### Get Student Scope — 200 OK (student must authenticate with their own JWT)
+# Replace {{studentToken}} with the id_token from student-login.
+GET {{baseUrl}}/exams/{{examId}}/students/{{studentId}}/scope
+Authorization: Bearer PASTE_STUDENT_TOKEN_HERE
+
+###
+
+### Get Student Scope — 403 Forbidden (student accesses another student's scope)
+GET {{baseUrl}}/exams/{{examId}}/students/some-other-student-id/scope
+Authorization: Bearer PASTE_STUDENT_TOKEN_HERE

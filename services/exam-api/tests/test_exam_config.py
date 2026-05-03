@@ -707,7 +707,7 @@ def config_client_bundle() -> tuple[TestClient, Mock, Mock, Mock]:
     jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "token_use": "id",
         }
     )

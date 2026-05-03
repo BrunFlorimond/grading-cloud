@@ -168,11 +168,19 @@ async def test_login_raises_invalid_credentials_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
+async def test_cognito_register_admin_creates_user_sets_password_adds_to_group() -> None:
     cognito = Mock()
-    cognito.sign_up = AsyncMock(return_value={"UserSub": "teacher-sub-uuid"})
+    cognito.admin_create_user = AsyncMock(
+        return_value={
+            "User": {
+                "Attributes": [
+                    {"Name": "sub", "Value": "teacher-sub-uuid"},
+                ],
+            },
+        }
+    )
+    cognito.admin_set_user_password = AsyncMock()
     cognito.admin_add_user_to_group = AsyncMock()
-    cognito.admin_update_user_attributes = AsyncMock()
     adapter = CognitoAuthAdapter(
         user_pool_id="pool-id",
         client_id="app-client-id",
@@ -186,31 +194,32 @@ async def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
     )
 
     assert teacher_id == "teacher-sub-uuid"
-    cognito.sign_up.assert_awaited_once_with(
-        ClientId="app-client-id",
+    create_call = cognito.admin_create_user.call_args.kwargs
+    assert create_call["UserPoolId"] == "pool-id"
+    assert create_call["Username"] == "teacher@example.com"
+    assert create_call["MessageAction"] == "SUPPRESS"
+    assert "TemporaryPassword" in create_call
+    user_attrs = create_call["UserAttributes"]
+    assert {"Name": "email", "Value": "teacher@example.com"} in user_attrs
+    assert {"Name": "email_verified", "Value": "true"} in user_attrs
+    assert {"Name": "name", "Value": "Ada Lovelace"} in user_attrs
+    cognito.admin_set_user_password.assert_awaited_once_with(
+        UserPoolId="pool-id",
         Username="teacher@example.com",
         Password="StrongPassword123!",
-        UserAttributes=[
-            {"Name": "email", "Value": "teacher@example.com"},
-            {"Name": "name", "Value": "Ada Lovelace"},
-        ],
+        Permanent=True,
     )
     cognito.admin_add_user_to_group.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="teacher@example.com",
         GroupName=COGNITO_TEACHER_GROUP,
     )
-    cognito.admin_update_user_attributes.assert_awaited_once_with(
-        UserPoolId="pool-id",
-        Username="teacher@example.com",
-        UserAttributes=[{"Name": "custom:role", "Value": "teacher"}],
-    )
 
 
 @pytest.mark.asyncio
 async def test_cognito_register_maps_username_exists_to_duplicate_email() -> None:
     cognito = Mock()
-    cognito.sign_up = AsyncMock(
+    cognito.admin_create_user = AsyncMock(
         side_effect=_make_client_error(
             "UsernameExistsException",
             "User already exists",
@@ -233,7 +242,16 @@ async def test_cognito_register_maps_username_exists_to_duplicate_email() -> Non
 @pytest.mark.asyncio
 async def test_cognito_register_maps_invalid_password_to_weak_password() -> None:
     cognito = Mock()
-    cognito.sign_up = AsyncMock(
+    cognito.admin_create_user = AsyncMock(
+        return_value={
+            "User": {
+                "Attributes": [
+                    {"Name": "sub", "Value": "sub"},
+                ],
+            },
+        }
+    )
+    cognito.admin_set_user_password = AsyncMock(
         side_effect=_make_client_error(
             "InvalidPasswordException",
             "Password should contain special characters",
@@ -385,7 +403,6 @@ def test_post_register_403_without_admin_group(client: TestClient) -> None:
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-sub",
-            "custom:role": "teacher",
             "cognito:groups": ["teachers"],
         }
     )
@@ -475,7 +492,7 @@ def test_jwt_contains_required_claims() -> None:
     header = _encode_segment({"alg": "none", "typ": "JWT"})
     payload = _encode_segment(
         {
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "sub": "a1fdb8a9-4f65-4f3d-9f99-984f2634af11",
             "email": "teacher@example.com",
         }
@@ -484,6 +501,6 @@ def test_jwt_contains_required_claims() -> None:
 
     claims = _decode_jwt_payload(token)
 
-    assert claims["custom:role"] == "teacher"
+    assert claims["cognito:groups"] == ["teachers"]
     assert claims["sub"] == "a1fdb8a9-4f65-4f3d-9f99-984f2634af11"
     assert claims["email"] == "teacher@example.com"

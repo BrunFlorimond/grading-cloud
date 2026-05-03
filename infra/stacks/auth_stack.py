@@ -10,8 +10,7 @@ class AuthStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # custom:role is set by application code (e.g. AdminUpdateUserAttributes) at
-        # teacher/student invitation — not by Cognito triggers in this stack.
+        # RBAC uses Cognito pool groups (teachers / students / admin) on the ID token.
         user_pool = cognito.UserPool(
             self,
             "GradingUserPool",
@@ -21,13 +20,6 @@ class AuthStack(Stack):
             standard_attributes=cognito.StandardAttributes(
                 email=cognito.StandardAttribute(required=True, mutable=False),
             ),
-            custom_attributes={
-                "role": cognito.StringAttribute(
-                    min_len=7,
-                    max_len=7,
-                    mutable=True,
-                ),
-            },
             password_policy=cognito.PasswordPolicy(
                 min_length=8,
                 require_uppercase=True,

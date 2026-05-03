@@ -541,7 +541,7 @@ async def test_student_id_token_from_challenge_response_contains_claims() -> Non
     header = _encode_segment({"alg": "none", "typ": "JWT"})
     payload = _encode_segment(
         {
-            "custom:role": "student",
+            "cognito:groups": ["students"],
             "sub": "student-sub-uuid",
             "email": "student@school.edu",
             "custom:exam_id": "exam-123",
@@ -573,7 +573,7 @@ async def test_student_id_token_from_challenge_response_contains_claims() -> Non
 
     claims = _decode_jwt_payload(tokens.id_token)
 
-    assert claims["custom:role"] == "student"
+    assert claims["cognito:groups"] == ["students"]
     assert claims["sub"] == "student-sub-uuid"
     assert claims["email"] == "student@school.edu"
     assert claims["custom:exam_id"] == "exam-123"

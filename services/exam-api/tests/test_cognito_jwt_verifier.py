@@ -39,7 +39,7 @@ async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
     decode_mock = Mock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "token_use": "id",
         }
     )

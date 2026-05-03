@@ -76,7 +76,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 UserAttributes=[
                     {"Name": "email", "Value": student_email},
                     {"Name": "email_verified", "Value": "true"},
-                    {"Name": "custom:role", "Value": "student"},
                 ],
             )
             cognito_sub = self._extract_user_sub(response.get("User", {}), student_email)
@@ -87,13 +86,6 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
             existing_user = await cognito.admin_get_user(
                 UserPoolId=self._user_pool_id,
                 Username=student_email,
-            )
-            await cognito.admin_update_user_attributes(
-                UserPoolId=self._user_pool_id,
-                Username=student_email,
-                UserAttributes=[
-                    {"Name": "custom:role", "Value": "student"},
-                ],
             )
             await cognito.admin_set_user_password(
                 UserPoolId=self._user_pool_id,

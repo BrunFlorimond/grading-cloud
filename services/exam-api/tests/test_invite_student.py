@@ -68,7 +68,7 @@ def client() -> TestClient:
     jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
             "token_use": "id",
         }
     )
@@ -311,7 +311,9 @@ async def test_adapter_creates_cognito_user_and_sends_email() -> None:
     cognito.admin_create_user.assert_awaited_once()
     create_call = cognito.admin_create_user.call_args.kwargs
     assert create_call["MessageAction"] == "SUPPRESS"
-    assert {"Name": "custom:role", "Value": "student"} in create_call["UserAttributes"]
+    assert {"Name": "email", "Value": "student@example.com"} in create_call[
+        "UserAttributes"
+    ]
     cognito.admin_add_user_to_group.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="student@example.com",
@@ -347,7 +349,6 @@ async def test_adapter_handles_existing_user_without_duplicate_account() -> None
             ]
         }
     )
-    cognito.admin_update_user_attributes = AsyncMock()
     cognito.admin_set_user_password = AsyncMock()
     cognito.admin_add_user_to_group = AsyncMock()
     ses.send_email = AsyncMock()
@@ -535,7 +536,7 @@ def test_api_returns_403_for_non_teacher_claim(client: TestClient) -> None:
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "teacher-1",
-            "custom:role": "student",
+            "cognito:groups": ["students"],
         }
     )
     client.app.dependency_overrides[provide_invite_use_case] = lambda: mock_use_case
@@ -556,7 +557,7 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "student-sub-123",
-            "custom:role": "student",
+            "cognito:groups": ["students"],
             "token_use": "id",
         }
     )
@@ -585,7 +586,7 @@ def test_student_scope_endpoint_returns_403_on_sub_mismatch(client: TestClient) 
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "student-sub-abc",
-            "custom:role": "student",
+            "cognito:groups": ["students"],
             "token_use": "id",
         }
     )
@@ -605,7 +606,7 @@ def test_student_scope_endpoint_ignores_custom_exam_id_claim(
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "student-sub-123",
-            "custom:role": "student",
+            "cognito:groups": ["students"],
             "custom:exam_id": "exam-from-token",
             "token_use": "id",
         }
@@ -633,7 +634,7 @@ def test_student_scope_endpoint_returns_404_when_scope_is_missing(
     client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
         return_value={
             "sub": "student-sub-123",
-            "custom:role": "student",
+            "cognito:groups": ["students"],
             "token_use": "id",
         }
     )

@@ -1,8 +1,8 @@
 """Centralised FastAPI dependency guards for role-based access control.
 
 Provides:
-    require_teacher  — rejects non-teacher JWTs with 403
-    require_student  — rejects non-student JWTs with 403
+    require_teacher  — rejects JWTs whose cognito:groups does not include teachers
+    require_student  — rejects JWTs whose cognito:groups does not include students
     require_admin    — rejects JWTs whose cognito:groups does not include admin
     require_own_data — rejects students accessing another student's resource with 403
 
@@ -28,7 +28,11 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
 )
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
-from exam_api.cognito_group_names import COGNITO_ADMIN_GROUP
+from exam_api.cognito_group_names import (
+    COGNITO_ADMIN_GROUP,
+    COGNITO_STUDENT_GROUP,
+    COGNITO_TEACHER_GROUP,
+)
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 # ---------------------------------------------------------------------------
@@ -118,19 +122,17 @@ async def require_teacher(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentTeacher:
-    """Dependency: bearer token must carry custom:role=teacher.
+    """Dependency: ID token must include cognito:groups containing the teachers pool group."""
 
-    Raises 401 when the token is absent/invalid, 403 when the role is wrong.
-    """
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
     claims = await _decode_token(token, jwt_verifier)
-    role = claims.get("custom:role")
-    if role != "teacher":
+    groups = _cognito_groups_from_claims(claims)
+    if COGNITO_TEACHER_GROUP not in groups:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "error": "Teacher role required.",
+                "error": "Teacher group membership required.",
                 "code": "insufficient_role",
             },
         )
@@ -150,19 +152,17 @@ async def require_student(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentStudent:
-    """Dependency: bearer token must carry custom:role=student.
+    """Dependency: ID token must include cognito:groups containing the students pool group."""
 
-    Raises 401 when the token is absent/invalid, 403 when the role is wrong.
-    """
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
     claims = await _decode_token(token, jwt_verifier)
-    role = claims.get("custom:role")
-    if role != "student":
+    groups = _cognito_groups_from_claims(claims)
+    if COGNITO_STUDENT_GROUP not in groups:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "error": "Student role required.",
+                "error": "Student group membership required.",
                 "code": "insufficient_role",
             },
         )

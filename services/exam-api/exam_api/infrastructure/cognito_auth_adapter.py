@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+import string
 from typing import Any
 
 import aiobotocore.session
@@ -57,13 +59,18 @@ class CognitoAuthAdapter(AuthServicePort):
         password: str,
         full_name: str,
     ) -> str:
+        # User pool has self-service SignUp disabled (see infra AuthStack). Provision
+        # teachers with AdminCreateUser + permanent password, same idea as student invite.
+        temporary_password = self._generate_internal_temporary_password()
         try:
-            sign_up_response = await client.sign_up(
-                ClientId=self._client_id,
+            create_response = await client.admin_create_user(
+                UserPoolId=self._user_pool_id,
                 Username=email,
-                Password=password,
+                TemporaryPassword=temporary_password,
+                MessageAction="SUPPRESS",
                 UserAttributes=[
                     {"Name": "email", "Value": email},
+                    {"Name": "email_verified", "Value": "true"},
                     {"Name": "name", "Value": full_name},
                 ],
             )
@@ -73,6 +80,17 @@ class CognitoAuthAdapter(AuthServicePort):
                 raise DuplicateEmailError(
                     "A teacher account already exists for this email."
                 ) from err
+            raise
+
+        try:
+            await client.admin_set_user_password(
+                UserPoolId=self._user_pool_id,
+                Username=email,
+                Password=password,
+                Permanent=True,
+            )
+        except ClientError as err:
+            error_code = self._extract_error_code(err)
             if error_code == "InvalidPasswordException":
                 message = err.response.get("Error", {}).get(
                     "Message", "Password does not meet the required policy."
@@ -85,12 +103,33 @@ class CognitoAuthAdapter(AuthServicePort):
             Username=email,
             GroupName=COGNITO_TEACHER_GROUP,
         )
-        await client.admin_update_user_attributes(
-            UserPoolId=self._user_pool_id,
-            Username=email,
-            UserAttributes=[{"Name": "custom:role", "Value": "teacher"}],
+        user_payload = create_response.get("User", {})
+        return self._extract_user_sub(user_payload, email)
+
+    @staticmethod
+    def _extract_user_sub(user_payload: dict[str, Any], username: str) -> str:
+        attributes = user_payload.get("UserAttributes") or user_payload.get(
+            "Attributes", []
         )
-        return str(sign_up_response["UserSub"])
+        if not isinstance(attributes, list):
+            raise RuntimeError(
+                f"Cognito response for {username} does not contain valid attributes."
+            )
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            if attribute.get("Name") != "sub":
+                continue
+            value = attribute.get("Value")
+            if isinstance(value, str) and value:
+                return value
+        raise RuntimeError(f"Missing Cognito sub for user {username}.")
+
+    @staticmethod
+    def _generate_internal_temporary_password(length: int = 20) -> str:
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
+        body = "".join(secrets.choice(alphabet) for _ in range(length))
+        return f"Aa1!{body}"
 
     async def login_teacher(self, *, email: str, password: str) -> AuthTokens:
         if self._injected_client is not None:

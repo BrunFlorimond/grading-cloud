@@ -134,7 +134,7 @@ def test_require_admin_returns_when_group_present(
     rbac_app: FastAPI, rbac_client: TestClient
 ) -> None:
     rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "a1", "cognito:groups": ["Admin"]}
+        return_value={"sub": "a1", "cognito:groups": ["admin"]}
     )
     response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 200

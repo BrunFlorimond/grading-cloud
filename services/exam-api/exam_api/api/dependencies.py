@@ -182,7 +182,7 @@ async def require_admin(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentAdmin:
-    """Dependency: ID token must include cognito:groups containing the Admin pool group."""
+    """Dependency: ID token must include cognito:groups containing the `admin` pool group."""
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
     claims = await _decode_token(token, jwt_verifier)
@@ -191,7 +191,7 @@ async def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "error": "Admin group membership required.",
+                "error": "Administrator group membership required.",
                 "code": "insufficient_role",
             },
         )

@@ -8,7 +8,7 @@
 @baseUrl = http://localhost:8000
 
 # ---------------------------------------------------------------------------
-# Register teacher: use an admin user's id_token (user must belong to Cognito group "Admin").
+# Register teacher: use an admin user's id_token (user must belong to Cognito group "admin").
 # After running "Login Teacher", copy the id_token into @teacherToken for teacher APIs.
 # ---------------------------------------------------------------------------
 @adminToken  = PASTE_ADMIN_ID_TOKEN_HERE
@@ -21,7 +21,7 @@
 # AUTH
 # ===========================================================================
 
-### Register Teacher — 201 Created (requires Admin Cognito group)
+### Register Teacher — 201 Created (requires Cognito group "admin")
 # @name registerTeacher
 POST {{baseUrl}}/auth/register
 Authorization: Bearer {{adminToken}}

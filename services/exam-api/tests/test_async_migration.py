@@ -25,7 +25,7 @@ def auth_client() -> TestClient:
     app = FastAPI()
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     jwt_verifier.decode_and_verify_token = AsyncMock(
-        return_value={"sub": "admin", "cognito:groups": ["Admin"]}
+        return_value={"sub": "admin", "cognito:groups": ["admin"]}
     )
     app.state.jwt_verifier = jwt_verifier
     app.include_router(router)

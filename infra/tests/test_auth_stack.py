@@ -9,12 +9,12 @@ from __future__ import annotations
 import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
-from exam_api.cognito_group_names import (
+from stacks.auth_stack import AuthStack
+from stacks.constants import (
     COGNITO_ADMIN_GROUP,
     COGNITO_STUDENT_GROUP,
     COGNITO_TEACHER_GROUP,
 )
-from stacks.auth_stack import AuthStack
 
 
 # ---------------------------------------------------------------------------

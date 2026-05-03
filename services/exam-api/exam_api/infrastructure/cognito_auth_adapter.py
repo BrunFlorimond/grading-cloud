@@ -111,8 +111,14 @@ class CognitoAuthAdapter(AuthServicePort):
             raise TeacherGroupAssignmentError(
                 "Could not assign the new teacher to the teachers group."
             ) from err
-        user_payload = create_response.get("User", {})
-        return self._extract_user_sub(user_payload, email)
+        try:
+            user_payload = create_response.get("User", {})
+            return self._extract_user_sub(user_payload, email)
+        except RuntimeError as err:
+            await self._admin_delete_user_best_effort(client, email)
+            raise TeacherGroupAssignmentError(
+                "Could not read the new teacher identifier from Cognito."
+            ) from err
 
     @staticmethod
     def _extract_user_sub(user_payload: dict[str, Any], username: str) -> str:

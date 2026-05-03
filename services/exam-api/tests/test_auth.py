@@ -318,6 +318,41 @@ async def test_cognito_register_group_assignment_failure_deletes_user() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_cognito_register_missing_sub_deletes_user() -> None:
+    """If Cognito omits sub in AdminCreateUser response, roll back and map to domain error."""
+    cognito = Mock()
+    cognito.admin_create_user = AsyncMock(
+        return_value={
+            "User": {
+                "Attributes": [
+                    {"Name": "email", "Value": "teacher@example.com"},
+                ],
+            },
+        }
+    )
+    cognito.admin_set_user_password = AsyncMock()
+    cognito.admin_add_user_to_group = AsyncMock()
+    cognito.admin_delete_user = AsyncMock()
+    adapter = CognitoAuthAdapter(
+        user_pool_id="pool-id",
+        client_id="app-client-id",
+        client=cognito,
+    )
+
+    with pytest.raises(TeacherGroupAssignmentError, match="identifier"):
+        await adapter.register_teacher(
+            email="teacher@example.com",
+            password="StrongPassword123!",
+            full_name="Ada Lovelace",
+        )
+
+    cognito.admin_delete_user.assert_awaited_once_with(
+        UserPoolId="pool-id",
+        Username="teacher@example.com",
+    )
+
+
 def test_generate_internal_temporary_password_randomized_and_complex() -> None:
     seen: set[str] = set()
     for _ in range(30):

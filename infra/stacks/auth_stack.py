@@ -5,6 +5,12 @@ from aws_cdk import aws_ssm as ssm
 
 from constructs import Construct
 
+from stacks.constants import (
+    COGNITO_ADMIN_GROUP,
+    COGNITO_STUDENT_GROUP,
+    COGNITO_TEACHER_GROUP,
+)
+
 
 class AuthStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
@@ -33,7 +39,7 @@ class AuthStack(Stack):
             self,
             "TeachersGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="teachers",
+            group_name=COGNITO_TEACHER_GROUP,
             description="Teacher users for grading platform.",
         )
 
@@ -41,7 +47,7 @@ class AuthStack(Stack):
             self,
             "StudentsGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="students",
+            group_name=COGNITO_STUDENT_GROUP,
             description="Student users for grading platform.",
         )
 
@@ -49,7 +55,7 @@ class AuthStack(Stack):
             self,
             "AdminGroup",
             user_pool_id=user_pool.user_pool_id,
-            group_name="admin",
+            group_name=COGNITO_ADMIN_GROUP,
             description="Administrators who may register new teachers via the API.",
         )
 

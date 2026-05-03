@@ -103,6 +103,13 @@ def test_students_group_exists(template: assertions.Template) -> None:
     )
 
 
+def test_admin_group_exists(template: assertions.Template) -> None:
+    template.has_resource_properties(
+        "AWS::Cognito::UserPoolGroup",
+        {"GroupName": "admin"},
+    )
+
+
 # ---------------------------------------------------------------------------
 # App Client
 # ---------------------------------------------------------------------------

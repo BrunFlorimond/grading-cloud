@@ -9,6 +9,7 @@ from typing import Any
 import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
+from exam_api.cognito_group_names import COGNITO_STUDENT_GROUP
 from exam_api.ports.student_invite_port import InviteStudentResult, StudentInviteServicePort
 
 
@@ -105,7 +106,7 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
         await cognito.admin_add_user_to_group(
             UserPoolId=self._user_pool_id,
             Username=student_email,
-            GroupName="students",
+            GroupName=COGNITO_STUDENT_GROUP,
         )
         await self._send_invitation_email(
             ses,

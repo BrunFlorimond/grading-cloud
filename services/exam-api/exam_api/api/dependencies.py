@@ -3,6 +3,7 @@
 Provides:
     require_teacher  — rejects non-teacher JWTs with 403
     require_student  — rejects non-student JWTs with 403
+    require_admin    — rejects JWTs whose cognito:groups does not include admin
     require_own_data — rejects students accessing another student's resource with 403
 
 All 401/403 responses use the canonical JSON body: {"error": "...", "code": "..."}.
@@ -10,7 +11,7 @@ All 401/403 responses use the canonical JSON body: {"error": "...", "code": "...
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from httpx import HTTPError
@@ -27,11 +28,18 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
 )
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
+from exam_api.cognito_group_names import COGNITO_ADMIN_GROUP
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 # ---------------------------------------------------------------------------
 # Shared value objects returned by the dependency guards
 # ---------------------------------------------------------------------------
+
+
+class CurrentAdmin(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    admin_id: str
 
 
 class CurrentTeacher(BaseModel):
@@ -79,7 +87,7 @@ def _bearer_token(authorization: str | None) -> str:
     return token
 
 
-async def _decode_token(token: str, jwt_verifier: JwtVerifierPort) -> dict:
+async def _decode_token(token: str, jwt_verifier: JwtVerifierPort) -> dict[str, Any]:
     try:
         return await jwt_verifier.decode_and_verify_token(token)
     except (HTTPError, JWTError) as err:
@@ -87,6 +95,18 @@ async def _decode_token(token: str, jwt_verifier: JwtVerifierPort) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": "Invalid or expired JWT token.", "code": "invalid_token"},
         ) from err
+
+
+def _cognito_groups_from_claims(claims: dict[str, Any]) -> list[str]:
+    """Normalise cognito:groups to a list of strings (Cognito uses a list; some mocks may differ)."""
+    raw = claims.get("cognito:groups")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [g for g in raw if isinstance(g, str)]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +176,35 @@ async def require_student(
             },
         )
     return CurrentStudent(student_id=student_id)
+
+
+async def require_admin(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CurrentAdmin:
+    """Dependency: ID token must include cognito:groups containing the Admin pool group."""
+    token = _bearer_token(authorization)
+    jwt_verifier = _get_jwt_verifier(request)
+    claims = await _decode_token(token, jwt_verifier)
+    groups = _cognito_groups_from_claims(claims)
+    if COGNITO_ADMIN_GROUP not in groups:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "Admin group membership required.",
+                "code": "insufficient_role",
+            },
+        )
+    admin_id = claims.get("sub")
+    if not isinstance(admin_id, str) or not admin_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "Missing administrator identifier in JWT claims.",
+                "code": "missing_subject",
+            },
+        )
+    return CurrentAdmin(admin_id=admin_id)
 
 
 def require_own_data(path_param_name: str):

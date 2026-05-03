@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
 from botocore.exceptions import ClientError
@@ -32,9 +32,11 @@ from exam_api.domain.errors import (
     InvalidCredentialsError,
     WeakPasswordError,
 )
+from exam_api.cognito_group_names import COGNITO_TEACHER_GROUP
 from exam_api.domain.teacher import Teacher
 from exam_api.infrastructure.cognito_auth_adapter import CognitoAuthAdapter
 from exam_api.ports.auth_service_port import AuthTokens
+from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
 
 def _make_client_error(code: str, message: str) -> ClientError:
@@ -58,10 +60,19 @@ def _decode_jwt_payload(token: str) -> dict[str, str]:
     return json.loads(decoded.decode("utf-8"))
 
 
+_ADMIN_JWT_CLAIMS: dict[str, object] = {
+    "sub": "admin-sub",
+    "cognito:groups": ["admin"],
+}
+
+
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
     register_http_error_handlers(app)
+    jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
+    jwt_verifier.decode_and_verify_token = AsyncMock(return_value=_ADMIN_JWT_CLAIMS)
+    app.state.jwt_verifier = jwt_verifier
     app.include_router(router)
     test_client = TestClient(app)
     try:
@@ -187,7 +198,7 @@ async def test_cognito_register_calls_sign_up_and_adds_to_group() -> None:
     cognito.admin_add_user_to_group.assert_awaited_once_with(
         UserPoolId="pool-id",
         Username="teacher@example.com",
-        GroupName="teachers",
+        GroupName=COGNITO_TEACHER_GROUP,
     )
     cognito.admin_update_user_attributes.assert_awaited_once_with(
         UserPoolId="pool-id",
@@ -313,6 +324,7 @@ def test_post_register_201_returns_teacher_id(client: TestClient) -> None:
 
     response = client.post(
         "/auth/register",
+        headers={"Authorization": "Bearer admin-token"},
         json={
             "email": "teacher@example.com",
             "password": "StrongPassword123!",
@@ -335,6 +347,7 @@ def test_post_register_409_duplicate_email(client: TestClient) -> None:
 
     response = client.post(
         "/auth/register",
+        headers={"Authorization": "Bearer admin-token"},
         json={
             "email": "teacher@example.com",
             "password": "StrongPassword123!",
@@ -346,6 +359,52 @@ def test_post_register_409_duplicate_email(client: TestClient) -> None:
     assert response.json()["detail"] == "duplicate"
 
 
+def test_post_register_401_without_bearer(client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock()
+    client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "teacher@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "Ada Lovelace",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "missing_token"
+    mock_use_case.execute.assert_not_called()
+
+
+def test_post_register_403_without_admin_group(client: TestClient) -> None:
+    mock_use_case = Mock()
+    mock_use_case.execute = AsyncMock()
+    client.app.dependency_overrides[get_register_use_case] = lambda: mock_use_case
+    client.app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={
+            "sub": "teacher-sub",
+            "custom:role": "teacher",
+            "cognito:groups": ["teachers"],
+        }
+    )
+
+    response = client.post(
+        "/auth/register",
+        headers={"Authorization": "Bearer id-token"},
+        json={
+            "email": "teacher@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "Ada Lovelace",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_role"
+    mock_use_case.execute.assert_not_called()
+
+
 def test_post_register_400_weak_password(client: TestClient) -> None:
     mock_use_case = Mock()
     mock_use_case.execute = AsyncMock(
@@ -355,6 +414,7 @@ def test_post_register_400_weak_password(client: TestClient) -> None:
 
     response = client.post(
         "/auth/register",
+        headers={"Authorization": "Bearer admin-token"},
         json={
             "email": "teacher@example.com",
             "password": "weak",

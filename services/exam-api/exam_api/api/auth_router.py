@@ -19,6 +19,7 @@ from exam_api.application.register_teacher import (
     RegisterTeacherCommand,
     RegisterTeacherUseCase,
 )
+from exam_api.api.dependencies import CurrentAdmin, require_admin
 from exam_api.domain.errors import (
     DuplicateEmailError,
     InvalidCredentialsError,
@@ -85,6 +86,7 @@ def get_login_use_case() -> LoginTeacherUseCase:
 )
 async def register(
     body: RegisterRequest,
+    _: Annotated[CurrentAdmin, Depends(require_admin)],
     use_case: Annotated[RegisterTeacherUseCase, Depends(get_register_use_case)],
 ) -> RegisterResponse:
     try:

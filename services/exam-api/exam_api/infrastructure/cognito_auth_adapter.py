@@ -12,6 +12,7 @@ from exam_api.domain.errors import (
     InvalidCredentialsError,
     WeakPasswordError,
 )
+from exam_api.cognito_group_names import COGNITO_TEACHER_GROUP
 from exam_api.ports.auth_service_port import AuthChallenge, AuthServicePort, AuthTokens
 
 
@@ -82,7 +83,7 @@ class CognitoAuthAdapter(AuthServicePort):
         await client.admin_add_user_to_group(
             UserPoolId=self._user_pool_id,
             Username=email,
-            GroupName="teachers",
+            GroupName=COGNITO_TEACHER_GROUP,
         )
         await client.admin_update_user_attributes(
             UserPoolId=self._user_pool_id,

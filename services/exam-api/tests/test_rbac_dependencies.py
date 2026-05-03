@@ -12,8 +12,10 @@ from httpx import HTTPError
 from jose import JWTError
 
 from exam_api.api.dependencies import (
+    CurrentAdmin,
     CurrentStudent,
     CurrentTeacher,
+    require_admin,
     require_own_data,
     require_student,
     require_teacher,
@@ -49,6 +51,12 @@ def rbac_app() -> FastAPI:
         _: Annotated[CurrentStudent, Depends(require_student)],
     ) -> dict[str, str]:
         return {"role": "student"}
+
+    @app.get("/admin-only")
+    async def admin_route(
+        _: Annotated[CurrentAdmin, Depends(require_admin)],
+    ) -> dict[str, str]:
+        return {"role": "admin"}
 
     @app.get("/exams/{exam_id}/students/{student_id}/mine")
     async def own_route(
@@ -118,6 +126,28 @@ def test_require_teacher_403_missing_role(
         return_value={"sub": "x"}
     )
     response = rbac_client.get("/teacher-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 403
+    assert response.json()["code"] == "insufficient_role"
+
+
+def test_require_admin_returns_when_group_present(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "a1", "cognito:groups": ["Admin"]}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 200
+    assert response.json() == {"role": "admin"}
+
+
+def test_require_admin_403_without_admin_group(
+    rbac_app: FastAPI, rbac_client: TestClient
+) -> None:
+    rbac_app.state.jwt_verifier.decode_and_verify_token = AsyncMock(
+        return_value={"sub": "t", "cognito:groups": ["teachers"]}
+    )
+    response = rbac_client.get("/admin-only", headers={"Authorization": "Bearer x"})
     assert response.status_code == 403
     assert response.json()["code"] == "insufficient_role"
 

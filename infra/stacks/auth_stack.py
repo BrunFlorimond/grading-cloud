@@ -53,6 +53,14 @@ class AuthStack(Stack):
             description="Student users for grading platform.",
         )
 
+        cognito.CfnUserPoolGroup(
+            self,
+            "AdminGroup",
+            user_pool_id=user_pool.user_pool_id,
+            group_name="admin",
+            description="Administrators who may register new teachers via the API.",
+        )
+
         user_pool_client = user_pool.add_client(
             "GradingSpaClient",
             user_pool_client_name="grading-spa-client",

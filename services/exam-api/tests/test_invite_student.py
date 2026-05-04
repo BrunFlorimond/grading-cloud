@@ -18,7 +18,13 @@ from exam_api.api.dependencies import (
     verify_teacher_exam_ownership,
 )
 from exam_api.api.http_error_handlers import register_http_error_handlers
-from exam_api.api.invite_router import provide_invite_use_case, router
+from exam_api.api.invite_router import (
+    get_invite_exam_repository,
+    get_invite_scope_repository,
+    get_student_scope_repository,
+    provide_invite_use_case,
+    router,
+)
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentResult,
@@ -63,6 +69,9 @@ def client() -> TestClient:
     invite_repository.save_notation_payload = AsyncMock()
     invite_repository.upsert_student_scope = AsyncMock()
     invite_repository.get_student_scope = AsyncMock()
+    app.dependency_overrides[get_invite_exam_repository] = lambda: invite_repository
+    app.dependency_overrides[get_invite_scope_repository] = lambda: invite_repository
+    app.dependency_overrides[get_student_scope_repository] = lambda: invite_repository
     app.state.invite_repository = invite_repository
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     jwt_verifier.decode_and_verify_token = AsyncMock(
@@ -142,7 +151,6 @@ async def test_use_case_returns_new_invite_result() -> None:
     assert result == InviteStudentResult(
         student=Student(
             student_id="student-sub-123",
-            exam_id="exam-1",
             email="student@example.com",
         ),
         re_invited=False,
@@ -377,7 +385,6 @@ def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
         return_value=InviteStudentResult(
             student=Student(
                 student_id="student-sub-123",
-                exam_id="exam-1",
                 email="student@example.com",
             ),
             re_invited=False,
@@ -409,7 +416,6 @@ def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
         return_value=InviteStudentResult(
             student=Student(
                 student_id="student-sub-existing",
-                exam_id="exam-1",
                 email="student@example.com",
             ),
             re_invited=True,
@@ -564,7 +570,6 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
-            exam_id="exam-1",
             email="student@example.com",
         )
     )
@@ -614,7 +619,6 @@ def test_student_scope_endpoint_ignores_custom_exam_id_claim(
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
-            exam_id="exam-from-path",
             email="student@example.com",
         )
     )

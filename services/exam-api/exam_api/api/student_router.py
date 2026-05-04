@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from exam_api.api.dependencies import (
     CurrentTeacher,
+    get_teacher_rls_session,
     require_teacher,
     verify_teacher_exam_ownership,
 )
@@ -27,6 +29,8 @@ from exam_api.domain.errors import (
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
+from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
+from exam_api.infrastructure.postgres_student_enrollment_repository import PostgresStudentEnrollmentRepository
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
 from exam_api.ports.student_enrollment_repository_port import (
     StudentEnrollmentRepositoryPort,
@@ -107,13 +111,10 @@ class ListStudentStatusesResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def get_exam_detail_repository(request: Request) -> ExamDetailRepositoryPort:
-    repository = getattr(request.app.state, "exam_detail_repository", None)
-    if not isinstance(repository, ExamDetailRepositoryPort):
-        raise RuntimeError(
-            "Missing exam detail repository. Set app.state.exam_detail_repository."
-        )
-    return repository
+def get_exam_detail_repository(
+    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
+) -> ExamDetailRepositoryPort:
+    return PostgresExamDetailRepository(session)
 
 
 def provide_list_student_statuses_use_case(
@@ -124,13 +125,10 @@ def provide_list_student_statuses_use_case(
     return ListExamStudentStatusesUseCase(exam_detail_repository=repository)
 
 
-def get_enrollment_repository(request: Request) -> StudentEnrollmentRepositoryPort:
-    repository = getattr(request.app.state, "student_enrollment_repository", None)
-    if not isinstance(repository, StudentEnrollmentRepositoryPort):
-        raise RuntimeError(
-            "Missing enrollment repository. Set app.state.student_enrollment_repository."
-        )
-    return repository
+def get_enrollment_repository(
+    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
+) -> StudentEnrollmentRepositoryPort:
+    return PostgresStudentEnrollmentRepository(session)
 
 
 def provide_add_students_use_case(

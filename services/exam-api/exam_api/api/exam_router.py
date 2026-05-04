@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from grading_shared.domain.exam import ExamStatus
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from exam_api.api.dependencies import (
     CurrentTeacher,
+    get_teacher_rls_session,
     require_teacher,
     verify_teacher_exam_ownership,
 )
@@ -28,6 +30,8 @@ from exam_api.domain.errors import (
     ExamTitleRequiredError,
     InvalidExamListCursorError,
 )
+from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
+from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
 from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryPort
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
 
@@ -96,13 +100,10 @@ class ExamDetailResponse(BaseModel):
     status_counts: StatusCountsResponse
 
 
-def get_exam_detail_repository(request: Request) -> ExamDetailRepositoryPort:
-    repository = getattr(request.app.state, "exam_detail_repository", None)
-    if not isinstance(repository, ExamDetailRepositoryPort):
-        raise RuntimeError(
-            "Missing exam detail repository. Set app.state.exam_detail_repository."
-        )
-    return repository
+def get_exam_detail_repository(
+    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
+) -> ExamDetailRepositoryPort:
+    return PostgresExamDetailRepository(session)
 
 
 def provide_get_exam_detail_use_case(
@@ -113,13 +114,10 @@ def provide_get_exam_detail_use_case(
     return GetExamDetailUseCase(exam_detail_repository=repository)
 
 
-def get_exam_creation_repository(request: Request) -> ExamCreationRepositoryPort:
-    repository = getattr(request.app.state, "exam_creation_repository", None)
-    if not isinstance(repository, ExamCreationRepositoryPort):
-        raise RuntimeError(
-            "Missing exam creation repository. Set app.state.exam_creation_repository."
-        )
-    return repository
+def get_exam_creation_repository(
+    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
+) -> ExamCreationRepositoryPort:
+    return PostgresAssignmentRepository(session)
 
 
 def provide_create_exam_use_case(

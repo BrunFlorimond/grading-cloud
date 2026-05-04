@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import uuid
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
-from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.api.exam_router import router as exam_router
+from exam_api.api.exam_router import get_exam_creation_repository, router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.create_exam import CreateExamCommand, CreateExamUseCase
 from exam_api.application.list_teacher_exams import (
@@ -26,7 +23,6 @@ from exam_api.domain.errors import (
     ExamTitleTooLongError,
     InvalidExamListCursorError,
 )
-from exam_api.infrastructure.dynamodb_exam_creation_repository import DynamoDbExamCreationRepository
 from exam_api.ports.exam_creation_repository_port import ExamPage
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
 
@@ -186,6 +182,7 @@ def exam_api_client() -> TestClient:
     repo.list_teacher_exams = AsyncMock(
         return_value=ExamPage(items=[], next_cursor=None)
     )
+    app.dependency_overrides[get_exam_creation_repository] = lambda: repo
     app.state.exam_creation_repository = repo
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     jwt_verifier.decode_and_verify_token = AsyncMock(
@@ -207,7 +204,6 @@ def test_post_exams_requires_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(exam_router)
-    app.state.exam_creation_repository = Mock()
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 
@@ -263,7 +259,6 @@ def test_get_exams_requires_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(exam_router)
-    app.state.exam_creation_repository = Mock()
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 
@@ -346,178 +341,3 @@ def test_get_exams_invalid_cursor_returns_422(exam_api_client: TestClient) -> No
     )
 
     assert response.status_code == 422
-
-
-# --- DynamoDbExamCreationRepository ---
-
-
-@pytest.mark.asyncio
-async def test_create_exam_writes_metadata_item() -> None:
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock()
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    exam = Exam(
-        exam_id="550e8400-e29b-41d4-a716-446655440000",
-        teacher_id="teacher-1",
-        title="Midterm",
-        status=ExamStatus.CREATED,
-        created_at="2026-05-01T12:00:00.000000Z",
-    )
-
-    await repo.create_exam(exam)
-
-    puts = client.transact_write_items.call_args.kwargs["TransactItems"]
-    assert len(puts) == 3
-    meta = puts[0]["Put"]["Item"]
-    assert meta["PK"]["S"] == "EXAM#550e8400-e29b-41d4-a716-446655440000"
-    assert meta["SK"]["S"] == "METADATA"
-
-
-@pytest.mark.asyncio
-async def test_create_exam_writes_teacher_ownership_edge() -> None:
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock()
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    exam = Exam(
-        exam_id="550e8400-e29b-41d4-a716-446655440000",
-        teacher_id="teacher-1",
-        title="Midterm",
-        status=ExamStatus.CREATED,
-        created_at="2026-05-01T12:00:00.000000Z",
-    )
-
-    await repo.create_exam(exam)
-
-    puts = client.transact_write_items.call_args.kwargs["TransactItems"]
-    ownership = puts[1]["Put"]["Item"]
-    assert ownership["PK"]["S"] == "TEACHER#teacher-1"
-    assert ownership["SK"]["S"] == "EXAM#550e8400-e29b-41d4-a716-446655440000"
-
-
-@pytest.mark.asyncio
-async def test_list_teacher_exams_returns_only_own_exams() -> None:
-    client = AsyncMock()
-
-    async def _query(**kwargs: object) -> dict[str, object]:
-        pk = kwargs["ExpressionAttributeValues"][":pk"]["S"]
-        assert pk == "TEACHER#teacher-1"
-        return {"Items": [], "LastEvaluatedKey": None}
-
-    client.query = AsyncMock(side_effect=_query)
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    await repo.list_teacher_exams(teacher_id="teacher-1", limit=5, cursor=None)
-
-    client.query.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_list_teacher_exams_ordered_by_created_at_desc() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(return_value={"Items": [], "LastEvaluatedKey": None})
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    await repo.list_teacher_exams(teacher_id="teacher-1", limit=5, cursor=None)
-
-    kwargs = client.query.await_args.kwargs
-    assert kwargs["ScanIndexForward"] is False
-
-
-@pytest.mark.asyncio
-async def test_list_teacher_exams_cursor_pagination() -> None:
-    lek = {
-        "PK": {"S": "TEACHER#t1"},
-        "SK": {"S": "TS#2026-05-01T12:00:00.000000Z#e1"},
-    }
-
-    client = AsyncMock()
-    client.query = AsyncMock(
-        side_effect=[
-            {"Items": [], "LastEvaluatedKey": lek},
-            {"Items": [], "LastEvaluatedKey": None},
-        ]
-    )
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    page1 = await repo.list_teacher_exams(teacher_id="t1", limit=1, cursor=None)
-    assert page1.next_cursor is not None
-
-    await repo.list_teacher_exams(teacher_id="t1", limit=1, cursor=page1.next_cursor)
-
-    second_call = client.query.await_args_list[1].kwargs
-    assert second_call["ExclusiveStartKey"] == lek
-
-
-@pytest.mark.asyncio
-async def test_create_exam_transaction_conditional_failure_raises_conflict() -> None:
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock(
-        side_effect=ClientError(
-            {
-                "Error": {"Code": "TransactionCanceledException", "Message": "tx"},
-                "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
-            },
-            "TransactWriteItems",
-        )
-    )
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    exam = Exam(
-        exam_id="550e8400-e29b-41d4-a716-446655440000",
-        teacher_id="teacher-1",
-        title="Midterm",
-        status=ExamStatus.CREATED,
-        created_at="2026-05-01T12:00:00.000000Z",
-    )
-
-    with pytest.raises(ExamCreationConflictError):
-        await repo.create_exam(exam)
-
-
-@pytest.mark.asyncio
-async def test_list_teacher_exams_query_error_maps_to_invalid_cursor() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        side_effect=ClientError(
-            {"Error": {"Code": "ValidationException", "Message": "bad key"}},
-            "Query",
-        )
-    )
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    with pytest.raises(InvalidExamListCursorError):
-        await repo.list_teacher_exams(teacher_id="t1", limit=5, cursor=None)
-
-
-@pytest.mark.asyncio
-async def test_list_teacher_exams_invalid_cursor_shape_raises() -> None:
-    repo = DynamoDbExamCreationRepository(
-        table_name="grading-table",
-        dynamodb_client=AsyncMock(),
-    )
-    raw = base64.urlsafe_b64encode(json.dumps({"PK": "not-a-map"}).encode()).decode(
-        "ascii"
-    ).rstrip("=")
-
-    with pytest.raises(InvalidExamListCursorError):
-        await repo.list_teacher_exams(teacher_id="t1", limit=5, cursor=raw)

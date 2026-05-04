@@ -10,7 +10,7 @@ from exam_api.domain.student import Student
 @runtime_checkable
 class StudentScopeRepositoryPort(Protocol):
     async def upsert_student_scope(
-        self, *, student: Student, teacher_id: str, external_student_id: str
+        self, *, student: Student, exam_id: str, teacher_id: str, external_student_id: str
     ) -> None:
         """Persist student ownership scope for downstream authorization checks."""
 

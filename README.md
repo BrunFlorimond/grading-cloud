@@ -24,7 +24,7 @@ This system handles the full lifecycle:
 Teacher/Student
       │ HTTPS + JWT (Cognito)
       ▼
-API Gateway (HTTP API)
+Application Load Balancer
       │
       ▼
 ┌─────────────────────────────────┐
@@ -36,28 +36,28 @@ API Gateway (HTTP API)
 └─────────────────────────────────┘                                          │
       │                                                                       │
       ├── S3 (all files) ──────────────────────────────────────────────────  │
-      └── DynamoDB (single table) ─────────────────────────────────────────  │
+      └── PostgreSQL / RDS (exam data, RLS) ───────────────────────────────  │
                                                                               │
 spreadsheet-conversion SQS                                                    │
       │                                                                       │
       ▼                                                                       │
 spreadsheet-converter Lambda (×N parallel)                                    │
   xlsx / ods / numbers → structured JSON → S3                                 │
-  DynamoDB update → pipeline-events SQS ──────────────────────────────────►──┘
+  PostgreSQL update → pipeline-events SQS ───────────────────────────────►───┘
                                                                               │
 EventBridge Scheduler (every 5 min, one rule per active batch)                │
       │                                                                       │
       ▼                                                                       │
 batch-poller Lambda                                                           │
   Anthropic API: retrieve batch status                                        │
-  if ended → results to S3 → DynamoDB update → pipeline-events SQS ────────►─┘
+  if ended → results to S3 → PostgreSQL update → pipeline-events SQS ──────►─┘
                                                                               │
 pdf-generation SQS                                                            │
       │                                                                       │
       ▼                                                                       │
 pdf-generator Lambda (×N parallel)                                            │
   Jinja2 HTML + cohort stats + matplotlib chart → WeasyPrint → PDF → S3      │
-  DynamoDB update → pipeline-events SQS ────────────────────────────────────►┘
+  PostgreSQL update → pipeline-events SQS ──────────────────────────────────►┘
 ```
 
 ### Pipeline Phases
@@ -79,12 +79,13 @@ pdf-generator Lambda (×N parallel)                                            �
 | Runtime | Python 3.12 |
 | API framework | FastAPI |
 | Data validation | Pydantic v2 (strict typed models, `extra="forbid"`) |
+| ORM / async DB | SQLAlchemy 2.0 async + asyncpg |
 | AI | Anthropic Claude — Batch API (correction, harmonization), synchronous API (rubric generation) |
 | Compute | AWS Fargate (API + orchestration), AWS Lambda (conversion, polling, PDF) |
-| Storage | Amazon S3 (all files), Amazon DynamoDB (single-table, denormalized) |
+| Storage | Amazon S3 (all files), Amazon RDS PostgreSQL 16 (exam data, Row-Level Security) |
 | Messaging | Amazon SQS (3 queues + DLQs) |
 | Scheduling | Amazon EventBridge Scheduler (dynamic rules per active batch) |
-| Auth | Amazon Cognito (teacher / student groups, JWT) |
+| Auth | Amazon Cognito (teacher / student / admin groups, JWT) |
 | PDF generation | WeasyPrint + Jinja2 + matplotlib (replaces LaTeX — no TeX dependency) |
 | Infrastructure | AWS CDK (Python) |
 | CI/CD | GitHub Actions (OIDC, no long-lived keys) |
@@ -109,20 +110,25 @@ Every service (Fargate app and each Lambda) follows the same layering:
 ```
 API / Handler          thin — parse input, call use case, serialize output
 Application            use cases orchestrate domain objects, call ports
-Domain                 pure Python — entities, value objects, domain services
-                       Ports: FileStoragePort, ExamRepositoryPort,
-                              AIBatchPort, MessagePublisherPort, SchedulerPort
+Domain                 pure Python — entities, value objects, domain errors
+Ports                  ABCs: ExamCreationRepositoryPort, ExamDetailRepositoryPort,
+                              StudentEnrollmentRepositoryPort, StudentScopeRepositoryPort,
+                              ExamOwnershipPort, ExamConfigRepositoryPort,
+                              StudentInviteServicePort, JwtVerifierPort,
+                              FileStoragePort, AIBatchPort, MessagePublisherPort
 Infrastructure         AWS adapters implementing each port
-                       S3FileStorage, DynamoDBExamRepository,
-                       AnthropicBatchAdapter, SQSMessagePublisher,
-                       EventBridgeSchedulerAdapter
+                       PostgresAssignmentRepository (exam CRUD + config + ownership)
+                       PostgresExamDetailRepository (read-model queries)
+                       PostgresStudentEnrollmentRepository (roster + scope)
+                       S3ExamConfigStorage, CognitoSesStudentInviteAdapter,
+                       CognitoJwtVerifier
 ```
 
 The domain layer has zero AWS imports. All four services share it via the `grading_shared` workspace package.
 
 ### Event-Driven Pipeline
 
-The pipeline advances through a `pipeline-events` SQS queue consumed by a background worker in the Fargate app. No service polls another service over HTTP. State transitions are persisted to DynamoDB before publishing an event, making every step idempotent and recoverable.
+The pipeline advances through a `pipeline-events` SQS queue consumed by a background worker in the Fargate app. No service polls another service over HTTP. State transitions are persisted to PostgreSQL before publishing an event, making every step idempotent and recoverable.
 
 ### Why EventBridge Scheduler — not a polling Lambda loop
 
@@ -136,36 +142,32 @@ A full TeX Live installation weighs 3–4 GB — impractical for a Lambda contai
 
 ## Access Control
 
-Two roles, enforced by Cognito groups and FastAPI dependencies:
+Three roles, enforced by Cognito groups and FastAPI dependencies:
 
 | Role | Can do |
 |---|---|
+| **Admin** | Register teachers (invite to Cognito) |
 | **Teacher** | Create exams, upload config + spreadsheets, manage student roster, trigger pipeline, view all results for their exams, download all PDFs |
 | **Student** | Upload their own spreadsheet, view their own grade breakdown, download their own PDF |
 
-Students are scoped by DynamoDB mappings: student-facing endpoints require a JWT whose `cognito:groups` includes `students` and a matching `sub`, then validate that `PK=EXAM#{exam_id}` and `SK=STUDENT#{sub}` exists.
+Access is enforced at two layers:
+
+1. **FastAPI dependencies** — `require_teacher`, `require_student`, `require_admin` reject JWTs missing the expected `cognito:groups` value; `require_own_data` blocks students from accessing another student's resource.
+2. **PostgreSQL Row-Level Security** — every transaction runs with `SET LOCAL app.user_id` and `SET LOCAL app.user_type` GUCs injected by `session_with_rls`. RLS policies on each table enforce row visibility at the database level, so no application-level filter can accidentally leak data.
 
 ---
 
-## DynamoDB Single-Table Design
+## Data Model (PostgreSQL)
 
-All entities share one table (`grading-table`):
+The `exam-api` uses RDS PostgreSQL 16 with Row-Level Security. Core tables:
 
-```
-PK                         SK                                Attributes
-────────────────────────────────────────────────────────────────────────────
-TEACHER#{teacher_id}       EXAM#{exam_id}                    title, status, created_at
-EXAM#{exam_id}             METADATA                          config S3 keys, status, teacher_id
-EXAM#{exam_id}             STUDENT#{student_id}              name, class, submission_status, S3 keys
-EXAM#{exam_id}             BATCH#CORRECTION#{batch_id}       status, created_at, ended_at, scheduler_rule
-EXAM#{exam_id}             BATCH#HARMONIZATION#{batch_id}    status, created_at, ended_at, scheduler_rule
-TEACHER#{teacher_id}       RUBRIC#{rubric_id}                name, structure, status, version count
-RUBRIC#{rubric_id}         VERSION#{label}                   immutable structure snapshot
-```
+| Table | Key columns | RLS policy |
+|---|---|---|
+| `assignments` | `id` (UUID PK), `created_by` (teacher sub), `title`, `status`, `config_*` (S3 keys) | Teacher sees only rows where `created_by = app.user_id` |
+| `teacher_assignments` | `teacher_id`, `assignment_id` (FK) | Teacher edge — lists exams belonging to a teacher |
+| `student_assignments` | `assignment_id` (FK), `student_id`, `nom`, `prenom`, `classe`, `email`, `submission_status` | Teacher sees all rows for their exams; student sees only their own row |
 
-**GSI-1** `BatchIndex` — PK: `BATCH#{batch_id}` — lets the batch-poller Lambda look up the parent exam from a bare batch ID.
-
-**GSI-2** `TeacherExams` — PK: `TEACHER#{teacher_id}`, SK: `created_at` — lists a teacher's exams chronologically.
+Every request opens a transaction with `SET LOCAL app.user_id = <sub>` and `SET LOCAL app.user_type = teacher|student` via the `session_with_rls` context manager. All repository queries run inside that transaction — no application-level row filter is needed.
 
 ---
 
@@ -190,15 +192,17 @@ grading-cloud/
 ├── shared/                        # grading_shared — domain models, ports, events
 │   └── grading_shared/
 │       ├── domain/                # NotationPayload, Exam, StudentSubmission, PipelineEvent
-│       └── ports/                 # ABCs: FileStoragePort, AIBatchPort, etc.
+│       └── ports/                 # ABCs: FileStoragePort, ExamRepositoryPort, AIBatchPort, etc.
 │
 ├── services/
 │   ├── exam-api/                  # Fargate FastAPI app
-│   │   └── src/exam_api/
-│   │       ├── api/               # FastAPI routers (exams, students, rubrics, auth)
-│   │       ├── application/       # Use cases (CreateExam, StartPipeline, ProcessEvent, …)
-│   │       ├── domain/            # HarmonizationService, CohortStatsService, pipeline consumer
-│   │       └── infrastructure/    # DynamoDB, S3, SQS, Anthropic, EventBridge adapters
+│   │   └── exam_api/
+│   │       ├── api/               # FastAPI routers + RBAC dependencies
+│   │       ├── application/       # Use cases (CreateExam, InviteStudent, GetExamDetail, …)
+│   │       ├── domain/            # Domain errors, student model
+│   │       ├── ports/             # Repository and service port interfaces
+│   │       └── infrastructure/    # PostgreSQL (SQLAlchemy + asyncpg), S3, Cognito adapters
+│   │                              # session_with_rls — injects RLS GUCs per transaction
 │   │
 │   ├── spreadsheet-converter/     # Lambda — xlsx/ods/numbers → JSON
 │   ├── batch-poller/              # Lambda — Anthropic batch status check
@@ -206,11 +210,10 @@ grading-cloud/
 │
 ├── infra/                         # CDK Python
 │   └── stacks/
-│       ├── auth_stack.py          # Cognito User Pool + API Gateway
-│       ├── storage_stack.py       # S3 + DynamoDB
-│       ├── messaging_stack.py     # SQS queues + DLQs
-│       ├── lambda_stack.py        # Lambda functions + EventBridge Scheduler group
-│       └── compute_stack.py       # ECR + Fargate + ALB
+│       ├── auth_stack.py          # Cognito User Pool (teacher / student / admin groups)
+│       ├── storage_stack.py       # S3 files bucket
+│       ├── database_stack.py      # VPC, RDS PostgreSQL 16, security groups, Secrets Manager
+│       └── compute_stack.py       # ECR, Fargate service, ALB, SQS, task IAM role
 │
 └── templates/
     └── report_template.html       # Jinja2 HTML report template (stored in S3 at deploy time)

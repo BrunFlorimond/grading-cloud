@@ -50,11 +50,11 @@ class InviteStudentUseCase:
         )
         student = Student(
             student_id=invite_result.cognito_sub,
-            exam_id=exam.exam_id,
             email=command.student_email,
         )
         await self._student_scope_repository.upsert_student_scope(
             student=student,
+            exam_id=exam.exam_id,
             teacher_id=command.teacher_id,
             external_student_id=command.student_id,
         )

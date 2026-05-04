@@ -11,12 +11,14 @@ All 401/403 responses use the canonical JSON body: {"error": "...", "code": "...
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from httpx import HTTPError
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from exam_api.application.verify_exam_ownership import (
     VerifyExamOwnershipCommand,
@@ -27,6 +29,8 @@ from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
 )
+from exam_api.infrastructure.db import RLSContext, session_with_rls
+from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.cognito_group_names import (
     COGNITO_ADMIN_GROUP,
@@ -248,13 +252,30 @@ def require_own_data(path_param_name: str):
 # ---------------------------------------------------------------------------
 
 
-def get_exam_ownership_repository(request: Request) -> ExamOwnershipPort:
-    repository = getattr(request.app.state, "exam_ownership_repository", None)
-    if not isinstance(repository, ExamOwnershipPort):
-        raise RuntimeError(
-            "Missing exam ownership configuration. Set app.state.exam_ownership_repository."
-        )
-    return repository
+async def get_teacher_rls_session(
+    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Open a transaction with teacher RLS context. Deduplicated per-request by FastAPI."""
+    async with session_with_rls(
+        RLSContext(user_id=current_teacher.teacher_id, user_type="teacher")
+    ) as session:
+        yield session
+
+
+async def get_student_rls_session(
+    current_student: Annotated[CurrentStudent, Depends(require_student)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Open a transaction with student RLS context. Deduplicated per-request by FastAPI."""
+    async with session_with_rls(
+        RLSContext(user_id=current_student.student_id, user_type="student")
+    ) as session:
+        yield session
+
+
+def get_exam_ownership_repository(
+    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
+) -> ExamOwnershipPort:
+    return PostgresAssignmentRepository(session)
 
 
 def get_verify_exam_ownership_use_case(

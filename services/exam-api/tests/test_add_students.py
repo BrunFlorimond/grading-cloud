@@ -9,9 +9,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from exam_api.api.dependencies import get_exam_ownership_repository
 from exam_api.api.http_error_handlers import register_http_error_handlers
-from exam_api.api.student_router import get_enrollment_repository, get_exam_detail_repository, router as student_router
+from exam_api.api.student_router import router as student_router
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_detail_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.application.add_students import (
     AddStudentsCommand,
     AddStudentsUseCase,

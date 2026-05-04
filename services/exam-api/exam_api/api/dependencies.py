@@ -1,37 +1,21 @@
-"""Centralised FastAPI dependency guards for role-based access control.
+"""Centralised FastAPI RBAC dependency guards (JWT + Cognito groups).
 
-Provides:
-    require_teacher  — rejects JWTs whose cognito:groups does not include teachers
-    require_student  — rejects JWTs whose cognito:groups does not include students
-    require_admin    — rejects JWTs whose cognito:groups does not include admin
-    require_own_data — rejects students accessing another student's resource with 403
+Per-request PostgreSQL sessions with RLS GUCs:
+``exam_api.composition.rls_sessions``.
+
+Repository adapters: ``exam_api.composition.postgres_wiring``.
 
 All 401/403 responses use the canonical JSON body: {"error": "...", "code": "..."}.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from httpx import HTTPError
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from exam_api.application.verify_exam_ownership import (
-    VerifyExamOwnershipCommand,
-    VerifyExamOwnershipUseCase,
-)
-from exam_api.domain.errors import (
-    EXAM_NOT_FOUND_FOR_CLIENT,
-    ExamNotFoundError,
-    ExamOwnershipError,
-)
-from exam_api.infrastructure.db import RLSContext, session_with_rls
-from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
-from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.cognito_group_names import (
     COGNITO_ADMIN_GROUP,
     COGNITO_STUDENT_GROUP,
@@ -245,71 +229,3 @@ def require_own_data(path_param_name: str):
             )
 
     return _guard
-
-
-# ---------------------------------------------------------------------------
-# Exam ownership (shared routers — avoids coupling routers to invite_router)
-# ---------------------------------------------------------------------------
-
-
-async def get_teacher_rls_session(
-    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-) -> AsyncGenerator[AsyncSession, None]:
-    """Open a transaction with teacher RLS context. Deduplicated per-request by FastAPI."""
-    async with session_with_rls(
-        RLSContext(user_id=current_teacher.teacher_id, user_type="teacher")
-    ) as session:
-        yield session
-
-
-async def get_student_rls_session(
-    current_student: Annotated[CurrentStudent, Depends(require_student)],
-) -> AsyncGenerator[AsyncSession, None]:
-    """Open a transaction with student RLS context. Deduplicated per-request by FastAPI."""
-    async with session_with_rls(
-        RLSContext(user_id=current_student.student_id, user_type="student")
-    ) as session:
-        yield session
-
-
-def get_exam_ownership_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamOwnershipPort:
-    return PostgresAssignmentRepository(session)
-
-
-def get_verify_exam_ownership_use_case(
-    exam_ownership_repository: Annotated[
-        ExamOwnershipPort,
-        Depends(get_exam_ownership_repository),
-    ],
-) -> VerifyExamOwnershipUseCase:
-    return VerifyExamOwnershipUseCase(exam_ownership_repository)
-
-
-async def verify_teacher_exam_ownership(
-    exam_id: str,
-    current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    use_case: Annotated[
-        VerifyExamOwnershipUseCase,
-        Depends(get_verify_exam_ownership_use_case),
-    ],
-) -> None:
-    """Ensure exam METADATA exists and the TEACHER#/EXAM# edge matches this teacher."""
-    try:
-        await use_case.execute(
-            VerifyExamOwnershipCommand(
-                teacher_id=current_teacher.teacher_id,
-                exam_id=exam_id,
-            )
-        )
-    except ExamNotFoundError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(err),
-        ) from err
-    except ExamOwnershipError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=EXAM_NOT_FOUND_FOR_CLIENT,
-        ) from err

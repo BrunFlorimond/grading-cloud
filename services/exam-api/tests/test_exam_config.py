@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.api.config_router import get_exam_config_repository, router as config_router
-from exam_api.api.dependencies import get_exam_ownership_repository
+from exam_api.api.config_router import router as config_router
+from exam_api.composition import get_exam_config_repository, get_exam_ownership_repository
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,

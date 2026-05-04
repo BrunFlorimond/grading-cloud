@@ -6,12 +6,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from exam_api.api.dependencies import (
-    CurrentTeacher,
-    get_teacher_rls_session,
-    require_teacher,
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_detail_repository,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.add_students import (
@@ -29,8 +28,6 @@ from exam_api.domain.errors import (
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
-from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
-from exam_api.infrastructure.postgres_student_enrollment_repository import PostgresStudentEnrollmentRepository
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
 from exam_api.ports.student_enrollment_repository_port import (
     StudentEnrollmentRepositoryPort,
@@ -107,14 +104,8 @@ class ListStudentStatusesResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Dependency providers
+# Use-case providers (repository wiring: ``exam_api.composition``)
 # ---------------------------------------------------------------------------
-
-
-def get_exam_detail_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamDetailRepositoryPort:
-    return PostgresExamDetailRepository(session)
 
 
 def provide_list_student_statuses_use_case(
@@ -123,12 +114,6 @@ def provide_list_student_statuses_use_case(
     ],
 ) -> ListExamStudentStatusesUseCase:
     return ListExamStudentStatusesUseCase(exam_detail_repository=repository)
-
-
-def get_enrollment_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> StudentEnrollmentRepositoryPort:
-    return PostgresStudentEnrollmentRepository(session)
 
 
 def provide_add_students_use_case(

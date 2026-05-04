@@ -7,12 +7,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from grading_shared.domain.exam import ExamStatus
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from exam_api.api.dependencies import (
-    CurrentTeacher,
-    get_teacher_rls_session,
-    require_teacher,
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
+from exam_api.composition import (
+    get_exam_creation_repository,
+    get_exam_detail_repository,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.create_exam import CreateExamCommand, CreateExamUseCase
@@ -30,8 +29,6 @@ from exam_api.domain.errors import (
     ExamTitleRequiredError,
     InvalidExamListCursorError,
 )
-from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
-from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
 from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryPort
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
 
@@ -100,24 +97,12 @@ class ExamDetailResponse(BaseModel):
     status_counts: StatusCountsResponse
 
 
-def get_exam_detail_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamDetailRepositoryPort:
-    return PostgresExamDetailRepository(session)
-
-
 def provide_get_exam_detail_use_case(
     repository: Annotated[
         ExamDetailRepositoryPort, Depends(get_exam_detail_repository)
     ],
 ) -> GetExamDetailUseCase:
     return GetExamDetailUseCase(exam_detail_repository=repository)
-
-
-def get_exam_creation_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamCreationRepositoryPort:
-    return PostgresAssignmentRepository(session)
 
 
 def provide_create_exam_use_case(

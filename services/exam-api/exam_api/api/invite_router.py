@@ -7,14 +7,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from grading_shared.ports import ExamRepositoryPort
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from exam_api.api.dependencies import (
     CurrentTeacher,
-    get_student_rls_session,
-    get_teacher_rls_session,
     require_own_data,
     require_teacher,
+)
+from exam_api.composition import (
+    get_invite_exam_repository,
+    get_invite_scope_repository,
+    get_student_scope_repository,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.invite_student import (
@@ -27,8 +29,6 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
     StudentExamScopeConflictError,
 )
-from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
-from exam_api.infrastructure.postgres_student_enrollment_repository import PostgresStudentEnrollmentRepository
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 
@@ -65,24 +65,6 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
             "Missing invite service configuration. Set app.state.student_invite_service."
         )
     return service
-
-
-def get_invite_exam_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamRepositoryPort:
-    return PostgresAssignmentRepository(session)
-
-
-def get_invite_scope_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> StudentScopeRepositoryPort:
-    return PostgresStudentEnrollmentRepository(session)
-
-
-def get_student_scope_repository(
-    session: Annotated[AsyncSession, Depends(get_student_rls_session)],
-) -> StudentScopeRepositoryPort:
-    return PostgresStudentEnrollmentRepository(session)
 
 
 def provide_invite_use_case(

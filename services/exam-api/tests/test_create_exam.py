@@ -10,7 +10,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 
-from exam_api.api.exam_router import get_exam_creation_repository, router as exam_router
+from exam_api.api.exam_router import router as exam_router
+from exam_api.composition import get_exam_creation_repository
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.create_exam import CreateExamCommand, CreateExamUseCase
 from exam_api.application.list_teacher_exams import (

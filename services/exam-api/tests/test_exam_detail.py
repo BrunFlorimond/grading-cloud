@@ -8,12 +8,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from exam_api.api.dependencies import get_exam_ownership_repository
-from exam_api.api.exam_router import get_exam_creation_repository, get_exam_detail_repository, router as exam_router
+from exam_api.api.exam_router import router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
-from exam_api.api.student_router import get_enrollment_repository
-from exam_api.api.student_router import get_exam_detail_repository as get_student_exam_detail_repository
 from exam_api.api.student_router import router as student_router
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_creation_repository,
+    get_exam_detail_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.application.get_exam_detail import (
     GetExamDetailCommand,
     GetExamDetailUseCase,
@@ -284,7 +287,7 @@ def student_statuses_api_client() -> TestClient:
     detail_repo.list_exam_student_statuses = AsyncMock(
         return_value=StudentPipelinePage(items=[], next_cursor=None),
     )
-    app.dependency_overrides[get_student_exam_detail_repository] = lambda: detail_repo
+    app.dependency_overrides[get_exam_detail_repository] = lambda: detail_repo
     app.state.exam_detail_repository = detail_repo
 
     ownership = Mock(spec=ExamOwnershipPort)

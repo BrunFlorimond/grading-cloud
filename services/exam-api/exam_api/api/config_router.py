@@ -6,10 +6,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from exam_api.api.dependencies import CurrentTeacher, get_teacher_rls_session, require_teacher
-from exam_api.api.dependencies import get_exam_ownership_repository
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
+from exam_api.composition import get_exam_config_repository, get_exam_ownership_repository
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,
     ConfirmExamConfigUseCase,
@@ -28,7 +27,6 @@ from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
 )
-from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
 from exam_api.ports.exam_config_repository_port import ExamConfigRepositoryPort
 from exam_api.ports.exam_config_storage_port import ExamConfigStoragePort
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
@@ -56,12 +54,6 @@ def get_exam_config_storage(request: Request) -> ExamConfigStoragePort:
             "Missing exam config storage. Set app.state.exam_config_storage."
         )
     return storage
-
-
-def get_exam_config_repository(
-    session: Annotated[AsyncSession, Depends(get_teacher_rls_session)],
-) -> ExamConfigRepositoryPort:
-    return PostgresAssignmentRepository(session)
 
 
 def provide_get_upload_urls_use_case(

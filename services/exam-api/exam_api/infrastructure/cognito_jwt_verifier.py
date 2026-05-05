@@ -19,7 +19,13 @@ class CognitoJwtVerifier:
         audience: str,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._issuer = issuer.rstrip("/")
+        # Accept either issuer base URL or full JWKS URL from env/config.
+        normalized_issuer = issuer.rstrip("/")
+        jwks_suffix = "/.well-known/jwks.json"
+        if normalized_issuer.endswith(jwks_suffix):
+            normalized_issuer = normalized_issuer[: -len(jwks_suffix)]
+
+        self._issuer = normalized_issuer
         self._audience = audience
         self._jwks_url = f"{self._issuer}/.well-known/jwks.json"
         self._keys_by_kid: dict[str, dict[str, str]] = {}

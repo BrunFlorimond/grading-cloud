@@ -16,6 +16,7 @@ from exam_api.domain.errors import (
     WeakPasswordError,
 )
 from exam_api.cognito_group_names import COGNITO_TEACHER_GROUP
+from exam_api.infrastructure.aws_client_config import build_client_kwargs
 from exam_api.ports.auth_service_port import AuthChallenge, AuthServicePort, AuthTokens
 
 
@@ -46,7 +47,9 @@ class CognitoAuthAdapter(AuthServicePort):
                 password=password,
                 full_name=full_name,
             )
-        async with self._session.create_client("cognito-idp") as client:
+        async with self._session.create_client(
+            "cognito-idp", **build_client_kwargs("cognito-idp")
+        ) as client:
             return await self._register_teacher_with_client(
                 client,
                 email=email,
@@ -177,7 +180,9 @@ class CognitoAuthAdapter(AuthServicePort):
                 email=email,
                 password=password,
             )
-        async with self._session.create_client("cognito-idp") as client:
+        async with self._session.create_client(
+            "cognito-idp", **build_client_kwargs("cognito-idp")
+        ) as client:
             return await self._login_teacher_with_client(
                 client,
                 email=email,
@@ -215,7 +220,9 @@ class CognitoAuthAdapter(AuthServicePort):
                 email=email,
                 password=password,
             )
-        async with self._session.create_client("cognito-idp") as client:
+        async with self._session.create_client(
+            "cognito-idp", **build_client_kwargs("cognito-idp")
+        ) as client:
             return await self._login_student_with_client(
                 client,
                 email=email,
@@ -268,7 +275,9 @@ class CognitoAuthAdapter(AuthServicePort):
                 session=session,
                 new_password=new_password,
             )
-        async with self._session.create_client("cognito-idp") as client:
+        async with self._session.create_client(
+            "cognito-idp", **build_client_kwargs("cognito-idp")
+        ) as client:
             return await self._respond_to_new_password_with_client(
                 client,
                 email=email,

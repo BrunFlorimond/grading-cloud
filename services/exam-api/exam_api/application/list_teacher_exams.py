@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from grading_shared.domain.models import StrictModel
 
-from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryPort, ExamPage
+from exam_api.ports.exam_creation_repository_port import (
+    ExamCreationRepositoryPort,
+    ExamPage,
+)
 
 _DEFAULT_PAGE_SIZE = 20
 

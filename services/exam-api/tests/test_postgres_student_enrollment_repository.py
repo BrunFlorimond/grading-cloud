@@ -13,7 +13,7 @@ from exam_api.domain.errors import (
     InvalidExamListCursorError,
     StudentExamScopeConflictError,
 )
-from exam_api.domain.student import EnrolledStudent, Student, SubmissionStatus
+from exam_api.domain.student import Student, StudentAssignment, SubmissionStatus
 from exam_api.infrastructure.orm import StudentAssignmentORM
 from exam_api.infrastructure.postgres_student_enrollment_repository import (
     PostgresStudentEnrollmentRepository,
@@ -23,10 +23,12 @@ EXAM_ID = "550e8400-e29b-41d4-a716-446655440000"
 COGNITO_SUB = "660e8400-e29b-41d4-a716-446655440000"
 
 
-def _enrolled(student_id: str = "EL-001", exam_id: str = EXAM_ID) -> EnrolledStudent:
-    return EnrolledStudent(
+def _enrolled(
+    student_id: str = "EL-001", assignment_id: str = EXAM_ID
+) -> StudentAssignment:
+    return StudentAssignment(
         student_id=student_id,
-        exam_id=exam_id,
+        assignment_id=assignment_id,
         nom="Doe",
         prenom="Jane",
         classe="A",
@@ -61,7 +63,9 @@ async def test_add_students_executes_insert_for_each_student() -> None:
     session.rollback = AsyncMock()
 
     repo = PostgresStudentEnrollmentRepository(session)
-    await repo.add_students(exam_id=EXAM_ID, students=[_enrolled("s1"), _enrolled("s2")])
+    await repo.add_students(
+        exam_id=EXAM_ID, students=[_enrolled("s1"), _enrolled("s2")]
+    )
 
     assert session.execute.await_count == 2
 
@@ -163,7 +167,9 @@ def _session_for_upsert_scope(conflict_row: MagicMock | None) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_upsert_student_scope_raises_conflict_when_sub_bound_to_other_exam() -> None:
+async def test_upsert_student_scope_raises_conflict_when_sub_bound_to_other_exam() -> (
+    None
+):
     other_row = _mock_student_assignment_row(assignment_id=str(uuid.uuid4()))
     session = _session_for_upsert_scope(conflict_row=other_row)
 
@@ -172,7 +178,10 @@ async def test_upsert_student_scope_raises_conflict_when_sub_bound_to_other_exam
 
     with pytest.raises(StudentExamScopeConflictError):
         await repo.upsert_student_scope(
-            student=student, exam_id=EXAM_ID, teacher_id="t1", external_student_id="EL-001"
+            student=student,
+            exam_id=EXAM_ID,
+            teacher_id="t1",
+            external_student_id="EL-001",
         )
 
 

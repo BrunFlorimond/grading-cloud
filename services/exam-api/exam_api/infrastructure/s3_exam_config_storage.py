@@ -58,9 +58,7 @@ class S3ExamConfigStorage:
     def config_object_key(self, *, exam_id: str, filename: str) -> str:
         return f"exams/{exam_id}/config/{filename}"
 
-    async def generate_upload_urls(
-        self, *, exam_id: str
-    ) -> dict[str, dict[str, Any]]:
+    async def generate_upload_urls(self, *, exam_id: str) -> dict[str, dict[str, Any]]:
         async def _post_one(client: Any, filename: str) -> tuple[str, dict[str, Any]]:
             key = self.config_object_key(exam_id=exam_id, filename=filename)
             post = await client.generate_presigned_post(

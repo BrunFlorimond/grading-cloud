@@ -38,8 +38,12 @@ class PostgresExamDetailRepository:
             description=row.description,
             subject=row.subject,
             created_at=row.created_at.isoformat() if row.created_at else None,
-            pipeline_started_at=row.pipeline_started_at.isoformat() if row.pipeline_started_at else None,
-            pipeline_completed_at=row.pipeline_completed_at.isoformat() if row.pipeline_completed_at else None,
+            pipeline_started_at=row.pipeline_started_at.isoformat()
+            if row.pipeline_started_at
+            else None,
+            pipeline_completed_at=row.pipeline_completed_at.isoformat()
+            if row.pipeline_completed_at
+            else None,
             status_counts=counts,
         )
 
@@ -58,7 +62,11 @@ class PostgresExamDetailRepository:
             pending=counts.get("PENDING", 0),
             converted=counts.get("CONVERTED", 0),
             corrected=counts.get("CORRECTED", 0),
-            other=sum(v for k, v in counts.items() if k not in {"PENDING", "CONVERTED", "CORRECTED"}),
+            other=sum(
+                v
+                for k, v in counts.items()
+                if k not in {"PENDING", "CONVERTED", "CORRECTED"}
+            ),
         )
 
     async def list_exam_student_statuses(

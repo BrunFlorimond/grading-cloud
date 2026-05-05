@@ -253,7 +253,9 @@ async def test_verify_exam_ownership_calls_port() -> None:
     port.verify_teacher_owns_exam = AsyncMock(return_value=None)
     uc = VerifyExamOwnershipUseCase(port)
     await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
-    port.verify_teacher_owns_exam.assert_awaited_once_with(teacher_id="t1", exam_id="e1")
+    port.verify_teacher_owns_exam.assert_awaited_once_with(
+        teacher_id="t1", exam_id="e1"
+    )
 
 
 @pytest.mark.asyncio
@@ -274,5 +276,3 @@ async def test_verify_exam_ownership_propagates_not_found() -> None:
     uc = VerifyExamOwnershipUseCase(port)
     with pytest.raises(ExamNotFoundError):
         await uc.execute(VerifyExamOwnershipCommand(teacher_id="t1", exam_id="e1"))
-
-

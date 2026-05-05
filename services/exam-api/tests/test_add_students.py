@@ -33,7 +33,7 @@ from exam_api.domain.errors import (
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
-from exam_api.domain.student import EnrolledStudent, SubmissionStatus
+from exam_api.domain.student import StudentAssignment, SubmissionStatus
 from exam_api.ports.exam_detail_repository_port import (
     ExamDetailRepositoryPort,
     StudentPipelinePage,
@@ -62,17 +62,17 @@ def _uuid4_string(value: str) -> bool:
 async def test_add_students_returns_created_list() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     created = [
-        EnrolledStudent(
+        StudentAssignment(
             student_id="s1",
-            exam_id="e1",
+            assignment_id="e1",
             nom="Doe",
             prenom="Jane",
             classe="A",
             submission_status=SubmissionStatus.PENDING,
         ),
-        EnrolledStudent(
+        StudentAssignment(
             student_id="s2",
-            exam_id="e1",
+            assignment_id="e1",
             nom="Roe",
             prenom="John",
             classe="B",
@@ -112,7 +112,7 @@ async def test_add_students_returns_created_list() -> None:
 async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
 
-    async def _capture(**kwargs: object) -> list[EnrolledStudent]:
+    async def _capture(**kwargs: object) -> list[StudentAssignment]:
         students = kwargs["students"]
         assert isinstance(students, list) and len(students) == 1
         return students

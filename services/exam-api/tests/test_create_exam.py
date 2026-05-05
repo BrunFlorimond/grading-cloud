@@ -19,7 +19,6 @@ from exam_api.application.list_teacher_exams import (
     ListTeacherExamsUseCase,
 )
 from exam_api.domain.errors import (
-    ExamCreationConflictError,
     ExamTitleRequiredError,
     ExamTitleTooLongError,
     InvalidExamListCursorError,
@@ -45,9 +44,7 @@ async def test_create_exam_returns_uuid_v4() -> None:
     repo.create_exam = AsyncMock()
     use_case = CreateExamUseCase(exam_repository=repo)
 
-    result = await use_case.execute(
-        CreateExamCommand(teacher_id="t1", title="Algebra")
-    )
+    result = await use_case.execute(CreateExamCommand(teacher_id="t1", title="Algebra"))
 
     assert _uuid4(result.exam_id)
 
@@ -58,9 +55,7 @@ async def test_create_exam_returns_status_created() -> None:
     repo.create_exam = AsyncMock()
     use_case = CreateExamUseCase(exam_repository=repo)
 
-    result = await use_case.execute(
-        CreateExamCommand(teacher_id="t1", title="Algebra")
-    )
+    result = await use_case.execute(CreateExamCommand(teacher_id="t1", title="Algebra"))
 
     assert result.status == "CREATED"
 
@@ -108,9 +103,7 @@ async def test_create_exam_with_title_over_120_chars_raises_error() -> None:
     use_case = CreateExamUseCase(exam_repository=repo)
 
     with pytest.raises(ExamTitleTooLongError):
-        await use_case.execute(
-            CreateExamCommand(teacher_id="t1", title="x" * 121)
-        )
+        await use_case.execute(CreateExamCommand(teacher_id="t1", title="x" * 121))
 
 
 @pytest.mark.asyncio
@@ -213,7 +206,9 @@ def test_post_exams_requires_auth() -> None:
     assert response.status_code == 401
 
 
-def test_post_exams_returns_201_with_exam_id_and_status(exam_api_client: TestClient) -> None:
+def test_post_exams_returns_201_with_exam_id_and_status(
+    exam_api_client: TestClient,
+) -> None:
     response = exam_api_client.post(
         "/exams",
         json={"title": "Final", "description": None, "subject": "Physics"},
@@ -246,7 +241,9 @@ def test_post_exams_title_too_long_returns_422(exam_api_client: TestClient) -> N
     assert response.status_code == 422
 
 
-def test_post_exams_whitespace_only_title_returns_422(exam_api_client: TestClient) -> None:
+def test_post_exams_whitespace_only_title_returns_422(
+    exam_api_client: TestClient,
+) -> None:
     response = exam_api_client.post(
         "/exams",
         json={"title": "   "},
@@ -324,9 +321,7 @@ def test_get_exams_returns_paginated_list(exam_api_client: TestClient) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["items"] == [
-        {"exam_id": "e1", "title": "T", "status": "CREATED"}
-    ]
+    assert body["items"] == [{"exam_id": "e1", "title": "T", "status": "CREATED"}]
     assert body["next_cursor"] is None
 
 

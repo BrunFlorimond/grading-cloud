@@ -42,12 +42,16 @@ class ConfirmExamConfigUseCase:
         self._config_storage = config_storage
         self._config_repository = config_repository
 
-    async def execute(self, command: ConfirmExamConfigCommand) -> ConfirmExamConfigResult:
+    async def execute(
+        self, command: ConfirmExamConfigCommand
+    ) -> ConfirmExamConfigResult:
         await self._exam_ownership.verify_teacher_owns_exam(
             teacher_id=command.teacher_id,
             exam_id=command.exam_id,
         )
-        exam = await self._config_repository.get_exam_for_config(exam_id=command.exam_id)
+        exam = await self._config_repository.get_exam_for_config(
+            exam_id=command.exam_id
+        )
         if exam is None:
             raise ExamNotFoundError(f"Exam {command.exam_id} not found.")
         if exam.status not in (ExamStatus.CREATED, ExamStatus.CONFIGURED):
@@ -56,7 +60,9 @@ class ConfirmExamConfigUseCase:
                 f"current status is {exam.status.value}."
             )
         if exam.created_at is None:
-            raise ExamConfigError("Exam metadata is missing created_at; cannot save config.")
+            raise ExamConfigError(
+                "Exam metadata is missing created_at; cannot save config."
+            )
 
         presence = await self._config_storage.all_files_exist(exam_id=command.exam_id)
         missing = [name for name, ok in presence.items() if not ok]

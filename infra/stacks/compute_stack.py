@@ -29,53 +29,69 @@ class ComputeStack(Stack):
 
         # ── ECR repositories ─────────────────────────────────────────────────
         self.exam_api_repository = ecr.Repository(
-            self, "ExamApiRepository",
+            self,
+            "ExamApiRepository",
             repository_name="exam-api",
             image_scan_on_push=True,
         )
         self.spreadsheet_converter_repository = ecr.Repository(
-            self, "SpreadsheetConverterRepository",
+            self,
+            "SpreadsheetConverterRepository",
             repository_name="spreadsheet-converter",
             image_scan_on_push=True,
         )
         self.batch_poller_repository = ecr.Repository(
-            self, "BatchPollerRepository",
+            self,
+            "BatchPollerRepository",
             repository_name="batch-poller",
             image_scan_on_push=True,
         )
         self.pdf_generator_repository = ecr.Repository(
-            self, "PdfGeneratorRepository",
+            self,
+            "PdfGeneratorRepository",
             repository_name="pdf-generator",
             image_scan_on_push=True,
         )
 
         # ── SQS ──────────────────────────────────────────────────────────────
         pipeline_dlq = sqs.Queue(
-            self, "PipelineEventsDlq",
+            self,
+            "PipelineEventsDlq",
             queue_name="grading-pipeline-events-dlq",
             retention_period=Duration.days(14),
             enforce_ssl=True,
         )
         pipeline_events_queue = sqs.Queue(
-            self, "PipelineEventsQueue",
+            self,
+            "PipelineEventsQueue",
             queue_name="grading-pipeline-events",
             retention_period=Duration.days(4),
             visibility_timeout=Duration.minutes(5),
-            dead_letter_queue=sqs.DeadLetterQueue(max_receive_count=5, queue=pipeline_dlq),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=5, queue=pipeline_dlq
+            ),
             enforce_ssl=True,
         )
 
         # ── EventBridge ──────────────────────────────────────────────────────
-        event_bus = events.EventBus(self, "GradingEventBus", event_bus_name="grading-event-bus")
+        event_bus = events.EventBus(
+            self, "GradingEventBus", event_bus_name="grading-event-bus"
+        )
 
         # ── ECS ──────────────────────────────────────────────────────────────
-        cluster = ecs.Cluster(self, "GradingCluster", vpc=vpc, cluster_name="grading-cluster")
+        cluster = ecs.Cluster(
+            self, "GradingCluster", vpc=vpc, cluster_name="grading-cluster"
+        )
 
-        task_definition = ecs.FargateTaskDefinition(self, "ExamApiTaskDefinition", cpu=512, memory_limit_mib=1024)
+        task_definition = ecs.FargateTaskDefinition(
+            self, "ExamApiTaskDefinition", cpu=512, memory_limit_mib=1024
+        )
 
         task_definition.add_container(
             "ExamApiContainer",
-            image=ecs.ContainerImage.from_ecr_repository(self.exam_api_repository, "latest"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                self.exam_api_repository, "latest"
+            ),
             container_name="exam-api",
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="exam-api",
@@ -91,7 +107,8 @@ class ComputeStack(Stack):
         )
 
         service = ecs.FargateService(
-            self, "ExamApiService",
+            self,
+            "ExamApiService",
             cluster=cluster,
             task_definition=task_definition,
             desired_count=0,
@@ -104,7 +121,8 @@ class ComputeStack(Stack):
 
         # ── ALB (explicit construction — avoids ecs_patterns SG auto-wiring) ─
         alb = elbv2.ApplicationLoadBalancer(
-            self, "ExamApiAlb",
+            self,
+            "ExamApiAlb",
             vpc=vpc,
             internet_facing=True,
             security_group=alb_sg,  # pre-wired in DatabaseStack
@@ -115,49 +133,94 @@ class ComputeStack(Stack):
             "ExamApiTargets",
             port=8000,
             targets=[service],
-            health_check=elbv2.HealthCheck(path="/health", healthy_http_codes="200-399"),
+            health_check=elbv2.HealthCheck(
+                path="/health", healthy_http_codes="200-399"
+            ),
         )
 
         # ── IAM ──────────────────────────────────────────────────────────────
         task_role = task_definition.task_role
-        task_role.add_to_principal_policy(iam.PolicyStatement(
-            sid="S3Access",
-            effect=iam.Effect.ALLOW,
-            actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"],
-            resources=[files_bucket.bucket_arn, files_bucket.arn_for_objects("*")],
-        ))
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="S3Access",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:DeleteObject",
+                    "s3:ListBucket",
+                ],
+                resources=[files_bucket.bucket_arn, files_bucket.arn_for_objects("*")],
+            )
+        )
         # Scoped grant — no wildcard; adds GetSecretValue + DescribeSecret on this ARN
         db_secret.grant_read(task_role)
-        task_role.add_to_principal_policy(iam.PolicyStatement(
-            sid="SqsAccess",
-            effect=iam.Effect.ALLOW,
-            actions=["sqs:ChangeMessageVisibility", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
-                     "sqs:GetQueueUrl", "sqs:ReceiveMessage", "sqs:SendMessage"],
-            resources=[pipeline_events_queue.queue_arn, pipeline_dlq.queue_arn],
-        ))
-        task_role.add_to_principal_policy(iam.PolicyStatement(
-            sid="SesAccess",
-            effect=iam.Effect.ALLOW,
-            actions=["ses:SendEmail", "ses:SendRawEmail"],
-            resources=[f"arn:aws:ses:{self.region}:{self.account}:identity/*"],
-        ))
-        task_role.add_to_principal_policy(iam.PolicyStatement(
-            sid="EventBridgeAccess",
-            effect=iam.Effect.ALLOW,
-            actions=["events:PutEvents"],
-            resources=[event_bus.event_bus_arn],
-        ))
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SqsAccess",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "sqs:ChangeMessageVisibility",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes",
+                    "sqs:GetQueueUrl",
+                    "sqs:ReceiveMessage",
+                    "sqs:SendMessage",
+                ],
+                resources=[pipeline_events_queue.queue_arn, pipeline_dlq.queue_arn],
+            )
+        )
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SesAccess",
+                effect=iam.Effect.ALLOW,
+                actions=["ses:SendEmail", "ses:SendRawEmail"],
+                resources=[f"arn:aws:ses:{self.region}:{self.account}:identity/*"],
+            )
+        )
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="EventBridgeAccess",
+                effect=iam.Effect.ALLOW,
+                actions=["events:PutEvents"],
+                resources=[event_bus.event_bus_arn],
+            )
+        )
 
         # ── Outputs ───────────────────────────────────────────────────────────
-        CfnOutput(self, "ExamApiRepositoryUri", value=self.exam_api_repository.repository_uri,
-                  export_name="GradingExamApiRepositoryUri")
-        CfnOutput(self, "ExamApiAlbDnsName", value=alb.load_balancer_dns_name,
-                  export_name="GradingExamApiAlbDnsName")
-        CfnOutput(self, "ExamApiClusterName", value=cluster.cluster_name,
-                  export_name="GradingExamApiClusterName")
-        CfnOutput(self, "ExamApiServiceName", value=service.service_name,
-                  export_name="GradingExamApiServiceName")
-        CfnOutput(self, "PipelineEventsQueueUrl", value=pipeline_events_queue.queue_url,
-                  export_name="GradingPipelineEventsQueueUrl")
-        CfnOutput(self, "EventBusName", value=event_bus.event_bus_name,
-                  export_name="GradingEventBusName")
+        CfnOutput(
+            self,
+            "ExamApiRepositoryUri",
+            value=self.exam_api_repository.repository_uri,
+            export_name="GradingExamApiRepositoryUri",
+        )
+        CfnOutput(
+            self,
+            "ExamApiAlbDnsName",
+            value=alb.load_balancer_dns_name,
+            export_name="GradingExamApiAlbDnsName",
+        )
+        CfnOutput(
+            self,
+            "ExamApiClusterName",
+            value=cluster.cluster_name,
+            export_name="GradingExamApiClusterName",
+        )
+        CfnOutput(
+            self,
+            "ExamApiServiceName",
+            value=service.service_name,
+            export_name="GradingExamApiServiceName",
+        )
+        CfnOutput(
+            self,
+            "PipelineEventsQueueUrl",
+            value=pipeline_events_queue.queue_url,
+            export_name="GradingPipelineEventsQueueUrl",
+        )
+        CfnOutput(
+            self,
+            "EventBusName",
+            value=event_bus.event_bus_name,
+            export_name="GradingEventBusName",
+        )

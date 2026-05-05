@@ -10,18 +10,22 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from exam_api.domain.errors import DuplicateStudentError, InvalidExamListCursorError, StudentExamScopeConflictError
-from exam_api.domain.student import EnrolledStudent, Student, SubmissionStatus
+from exam_api.domain.errors import (
+    DuplicateStudentError,
+    InvalidExamListCursorError,
+    StudentExamScopeConflictError,
+)
+from exam_api.domain.student import Student, StudentAssignment, SubmissionStatus
 from exam_api.infrastructure.orm import StudentAssignmentORM
 from exam_api.ports.student_enrollment_repository_port import EnrolledStudentPage
 
 logger = logging.getLogger(__name__)
 
 
-def _to_enrolled(row: StudentAssignmentORM) -> EnrolledStudent:
-    return EnrolledStudent(
+def _to_enrolled(row: StudentAssignmentORM) -> StudentAssignment:
+    return StudentAssignment(
         student_id=row.student_id,
-        exam_id=str(row.assignment_id),
+        assignment_id=str(row.assignment_id),
         nom=row.nom,
         prenom=row.prenom,
         classe=row.classe,
@@ -39,24 +43,21 @@ class PostgresStudentEnrollmentRepository:
     # ── StudentEnrollmentRepositoryPort ───────────────────────────────────
 
     async def add_students(
-        self, *, exam_id: str, students: list[EnrolledStudent]
-    ) -> list[EnrolledStudent]:
+        self, *, exam_id: str, students: list[StudentAssignment]
+    ) -> list[StudentAssignment]:
         if not students:
             return []
         assignment_uuid = uuid.UUID(exam_id)
         for student in students:
-            stmt = (
-                insert(StudentAssignmentORM)
-                .values(
-                    id=uuid.uuid4(),
-                    assignment_id=assignment_uuid,
-                    student_id=student.student_id,
-                    nom=student.nom,
-                    prenom=student.prenom,
-                    classe=student.classe,
-                    email=str(student.email) if student.email else None,
-                    submission_status=student.submission_status.value,
-                )
+            stmt = insert(StudentAssignmentORM).values(
+                id=uuid.uuid4(),
+                assignment_id=assignment_uuid,
+                student_id=student.student_id,
+                nom=student.nom,
+                prenom=student.prenom,
+                classe=student.classe,
+                email=str(student.email) if student.email else None,
+                submission_status=student.submission_status.value,
             )
             try:
                 await self._s.execute(stmt)
@@ -88,7 +89,12 @@ class PostgresStudentEnrollmentRepository:
     # ── StudentScopeRepositoryPort ────────────────────────────────────────
 
     async def upsert_student_scope(
-        self, *, student: Student, exam_id: str, teacher_id: str, external_student_id: str
+        self,
+        *,
+        student: Student,
+        exam_id: str,
+        teacher_id: str,
+        external_student_id: str,
     ) -> None:
         assignment_uuid = uuid.UUID(exam_id)
 
@@ -123,7 +129,9 @@ class PostgresStudentEnrollmentRepository:
         )
         await self._s.execute(stmt)
 
-    async def get_student_scope(self, *, exam_id: str, student_sub: str) -> Student | None:
+    async def get_student_scope(
+        self, *, exam_id: str, student_sub: str
+    ) -> Student | None:
         stmt = select(StudentAssignmentORM).where(
             StudentAssignmentORM.assignment_id == uuid.UUID(exam_id),
             StudentAssignmentORM.cognito_sub == student_sub,

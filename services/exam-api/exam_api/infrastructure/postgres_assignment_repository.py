@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,13 +59,17 @@ class PostgresAssignmentRepository:
             subject=exam.subject,
         )
         self._s.add(assignment)
-        self._s.add(TeacherAssignmentORM(
-            teacher_id=teacher_uuid,
-            assignment_id=exam_uuid,
-            role="owner",
-        ))
+        self._s.add(
+            TeacherAssignmentORM(
+                teacher_id=teacher_uuid,
+                assignment_id=exam_uuid,
+                role="owner",
+            )
+        )
 
-    async def list_teacher_exams(self, *, teacher_id: str, limit: int, cursor: str | None) -> ExamPage:
+    async def list_teacher_exams(
+        self, *, teacher_id: str, limit: int, cursor: str | None
+    ) -> ExamPage:
         try:
             offset = int(cursor) if cursor is not None else 0
         except ValueError:

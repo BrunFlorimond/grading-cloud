@@ -104,7 +104,9 @@ class DuplicateStudentError(StudentEnrollmentError):
     def __init__(self, student_id: str, exam_id: str) -> None:
         self.student_id = student_id
         self.exam_id = exam_id
-        super().__init__(f"Student {student_id!r} already enrolled in exam {exam_id!r}.")
+        super().__init__(
+            f"Student {student_id!r} already enrolled in exam {exam_id!r}."
+        )
 
 
 class StudentBatchTooLargeError(StudentEnrollmentError):

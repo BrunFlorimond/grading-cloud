@@ -32,8 +32,14 @@ _ALLOWED_TRANSITIONS: dict[ExamStatus, set[ExamStatus]] = {
     ExamStatus.DRAFT: {ExamStatus.READY, ExamStatus.FAILED},
     ExamStatus.READY: {ExamStatus.INGESTION_RUNNING, ExamStatus.FAILED},
     ExamStatus.INGESTION_RUNNING: {ExamStatus.CORRECTION_RUNNING, ExamStatus.FAILED},
-    ExamStatus.CORRECTION_RUNNING: {ExamStatus.HARMONIZATION_RUNNING, ExamStatus.FAILED},
-    ExamStatus.HARMONIZATION_RUNNING: {ExamStatus.PDF_GENERATION_RUNNING, ExamStatus.FAILED},
+    ExamStatus.CORRECTION_RUNNING: {
+        ExamStatus.HARMONIZATION_RUNNING,
+        ExamStatus.FAILED,
+    },
+    ExamStatus.HARMONIZATION_RUNNING: {
+        ExamStatus.PDF_GENERATION_RUNNING,
+        ExamStatus.FAILED,
+    },
     ExamStatus.PDF_GENERATION_RUNNING: {ExamStatus.COMPLETED, ExamStatus.FAILED},
     ExamStatus.COMPLETED: set(),
     ExamStatus.FAILED: set(),
@@ -58,4 +64,3 @@ class Exam(StrictModel):
                 f"Invalid exam status transition from {self.status} to {target_status}."
             )
         self.status = target_status
-

@@ -26,8 +26,12 @@ from exam_api.domain.errors import (
     ExamNotFoundError,
     ExamOwnershipError,
 )
-from exam_api.infrastructure.postgres_assignment_repository import PostgresAssignmentRepository
-from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
+from exam_api.infrastructure.postgres_assignment_repository import (
+    PostgresAssignmentRepository,
+)
+from exam_api.infrastructure.postgres_exam_detail_repository import (
+    PostgresExamDetailRepository,
+)
 from exam_api.infrastructure.postgres_student_enrollment_repository import (
     PostgresStudentEnrollmentRepository,
 )
@@ -36,7 +40,9 @@ from exam_api.ports.exam_creation_repository_port import ExamCreationRepositoryP
 from exam_api.ports.exam_detail_repository_port import ExamDetailRepositoryPort
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
-from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
+from exam_api.ports.student_enrollment_repository_port import (
+    StudentEnrollmentRepositoryPort,
+)
 
 
 def get_exam_detail_repository(

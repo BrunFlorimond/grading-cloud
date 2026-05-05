@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, call
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from grading_shared.domain.exam import Exam, ExamStatus
-from sqlalchemy.exc import IntegrityError
 
 from exam_api.domain.errors import (
     ExamConfigWrongStatusError,
@@ -62,7 +61,12 @@ async def test_create_exam_adds_assignment_and_teacher_assignment() -> None:
     session.add = MagicMock()
 
     repo = PostgresAssignmentRepository(session)
-    exam = Exam(exam_id=EXAM_ID, teacher_id=TEACHER_ID, title="Algebra", status=ExamStatus.CREATED)
+    exam = Exam(
+        exam_id=EXAM_ID,
+        teacher_id=TEACHER_ID,
+        title="Algebra",
+        status=ExamStatus.CREATED,
+    )
 
     await repo.create_exam(exam)
 
@@ -80,7 +84,12 @@ async def test_create_exam_raises_conflict_when_exam_exists() -> None:
     session.get = AsyncMock(return_value=row)
 
     repo = PostgresAssignmentRepository(session)
-    exam = Exam(exam_id=EXAM_ID, teacher_id=TEACHER_ID, title="Algebra", status=ExamStatus.CREATED)
+    exam = Exam(
+        exam_id=EXAM_ID,
+        teacher_id=TEACHER_ID,
+        title="Algebra",
+        status=ExamStatus.CREATED,
+    )
 
     with pytest.raises(ExamCreationConflictError):
         await repo.create_exam(exam)
@@ -226,7 +235,9 @@ async def test_save_exam_config_updates_status_to_configured() -> None:
 
     repo = PostgresAssignmentRepository(session)
     await repo.save_exam_config(
-        exam_id=EXAM_ID, teacher_id=TEACHER_ID, created_at="2026-05-01T00:00:00Z",
+        exam_id=EXAM_ID,
+        teacher_id=TEACHER_ID,
+        created_at="2026-05-01T00:00:00Z",
         config_s3_keys={},
     )
 
@@ -242,7 +253,9 @@ async def test_save_exam_config_raises_wrong_status_when_exam_not_found() -> Non
 
     with pytest.raises(ExamConfigWrongStatusError):
         await repo.save_exam_config(
-            exam_id=EXAM_ID, teacher_id=TEACHER_ID, created_at="2026-05-01T00:00:00Z",
+            exam_id=EXAM_ID,
+            teacher_id=TEACHER_ID,
+            created_at="2026-05-01T00:00:00Z",
             config_s3_keys={},
         )
 
@@ -257,6 +270,8 @@ async def test_save_exam_config_raises_wrong_status_when_already_running() -> No
 
     with pytest.raises(ExamConfigWrongStatusError):
         await repo.save_exam_config(
-            exam_id=EXAM_ID, teacher_id=TEACHER_ID, created_at="2026-05-01T00:00:00Z",
+            exam_id=EXAM_ID,
+            teacher_id=TEACHER_ID,
+            created_at="2026-05-01T00:00:00Z",
             config_s3_keys={},
         )

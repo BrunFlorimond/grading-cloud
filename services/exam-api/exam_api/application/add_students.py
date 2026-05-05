@@ -8,8 +8,10 @@ from grading_shared.domain.models import StrictModel
 from pydantic import EmailStr, Field, field_validator
 
 from exam_api.domain.errors import DuplicateStudentError, StudentBatchTooLargeError
-from exam_api.domain.student import EnrolledStudent, SubmissionStatus
-from exam_api.ports.student_enrollment_repository_port import StudentEnrollmentRepositoryPort
+from exam_api.domain.student import StudentAssignment, SubmissionStatus
+from exam_api.ports.student_enrollment_repository_port import (
+    StudentEnrollmentRepositoryPort,
+)
 
 _MAX_BATCH_SIZE = 50
 
@@ -41,7 +43,7 @@ class AddStudentsCommand(StrictModel):
 
 
 class AddStudentsResult(StrictModel):
-    created: list[EnrolledStudent]
+    created: list[StudentAssignment]
 
 
 class AddStudentsUseCase:
@@ -58,7 +60,7 @@ class AddStudentsUseCase:
         entities = self._build_entities(
             exam_id=command.exam_id, students=command.students
         )
-        self._assert_no_duplicate_ids(entities)
+        self._assert_no_duplicate_ids(command.exam_id, entities)
         created = await self._enrollment_repository.add_students(
             exam_id=command.exam_id, students=entities
         )
@@ -70,8 +72,8 @@ class AddStudentsUseCase:
 
     def _build_entities(
         self, *, exam_id: str, students: list[StudentInput]
-    ) -> list[EnrolledStudent]:
-        out: list[EnrolledStudent] = []
+    ) -> list[StudentAssignment]:
+        out: list[StudentAssignment] = []
         for s in students:
             raw_id = s.student_id
             if raw_id is None or not str(raw_id).strip():
@@ -79,9 +81,9 @@ class AddStudentsUseCase:
             else:
                 sid = str(raw_id).strip()
             out.append(
-                EnrolledStudent(
+                StudentAssignment(
                     student_id=sid,
-                    exam_id=exam_id,
+                    assignment_id=exam_id,
                     nom=s.nom,
                     prenom=s.prenom,
                     classe=s.classe,
@@ -92,9 +94,9 @@ class AddStudentsUseCase:
         return out
 
     @staticmethod
-    def _assert_no_duplicate_ids(students: list[EnrolledStudent]) -> None:
+    def _assert_no_duplicate_ids(exam_id: str, students: list[StudentAssignment]) -> None:
         seen: set[str] = set()
         for s in students:
             if s.student_id in seen:
-                raise DuplicateStudentError(s.student_id, s.exam_id)
+                raise DuplicateStudentError(s.student_id, exam_id)
             seen.add(s.student_id)

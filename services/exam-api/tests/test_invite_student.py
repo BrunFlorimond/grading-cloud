@@ -455,8 +455,8 @@ def test_api_returns_404_when_exam_not_found_at_ownership_verify(
     mock_verify_uc.execute = AsyncMock(
         side_effect=ExamNotFoundError("Exam exam-missing not found.")
     )
-    client.app.dependency_overrides[get_verify_exam_ownership_use_case] = (
-        lambda: mock_verify_uc
+    client.app.dependency_overrides[get_verify_exam_ownership_use_case] = lambda: (
+        mock_verify_uc
     )
     client.app.dependency_overrides.pop(verify_teacher_exam_ownership, None)
     client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(

@@ -6,13 +6,13 @@ from typing import Protocol, runtime_checkable
 
 from grading_shared.domain.models import StrictModel
 
-from exam_api.domain.student import EnrolledStudent
+from exam_api.domain.student import StudentAssignment
 
 
 class EnrolledStudentPage(StrictModel):
     """One page of enrolled students returned by list_exam_students."""
 
-    items: list[EnrolledStudent]
+    items: list[StudentAssignment]
     next_cursor: str | None
 
 
@@ -22,8 +22,8 @@ class StudentEnrollmentRepositoryPort(Protocol):
         self,
         *,
         exam_id: str,
-        students: list[EnrolledStudent],
-    ) -> list[EnrolledStudent]:
+        students: list[StudentAssignment],
+    ) -> list[StudentAssignment]:
         """Persist a batch of enrolled students.
 
         Raises DuplicateStudentError when any student_id already exists in this exam.

@@ -93,5 +93,3 @@ def test_ssm_parameter_bucket_name_exported(
             },
         },
     )
-
-

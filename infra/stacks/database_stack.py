@@ -23,21 +23,27 @@ class DatabaseStack(Stack):
         # ComputeStack passes the pre-wired SGs to the ALB and FargateService
         # via Fn::ImportValue references — no new dependency direction is created.
         self.alb_sg = ec2.SecurityGroup(
-            self, "AlbSg", vpc=self.vpc,
+            self,
+            "AlbSg",
+            vpc=self.vpc,
             description="Allow HTTP 80 from internet",
             allow_all_outbound=True,
         )
         self.alb_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80))
 
         self.fargate_sg = ec2.SecurityGroup(
-            self, "FargateSg", vpc=self.vpc,
+            self,
+            "FargateSg",
+            vpc=self.vpc,
             description="Allow port 8000 from ALB only",
             allow_all_outbound=True,
         )
         self.fargate_sg.add_ingress_rule(self.alb_sg, ec2.Port.tcp(8000))
 
         self.rds_sg = ec2.SecurityGroup(
-            self, "RdsSg", vpc=self.vpc,
+            self,
+            "RdsSg",
+            vpc=self.vpc,
             description="PostgreSQL access from Fargate tasks",
             allow_all_outbound=False,
         )
@@ -68,7 +74,9 @@ class DatabaseStack(Stack):
             ),
             credentials=rds.Credentials.from_secret(self.db_secret),
             vpc=self.vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+            ),
             multi_az=False,
             allocated_storage=20,
             storage_encrypted=True,

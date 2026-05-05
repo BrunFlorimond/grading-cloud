@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 
 from exam_api.api.config_router import router as config_router
-from exam_api.composition import get_exam_config_repository, get_exam_ownership_repository
+from exam_api.composition import (
+    get_exam_config_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,
@@ -88,7 +91,9 @@ async def test_get_upload_urls_returns_presigned_urls_for_all_four_files() -> No
 
 
 @pytest.mark.asyncio
-async def test_get_upload_urls_verifies_teacher_ownership_before_generating_urls() -> None:
+async def test_get_upload_urls_verifies_teacher_ownership_before_generating_urls() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
@@ -164,7 +169,9 @@ def _sample_exam(*, status: ExamStatus = ExamStatus.CREATED) -> Exam:
 
 
 @pytest.mark.asyncio
-async def test_confirm_config_returns_configured_status_when_all_files_present() -> None:
+async def test_confirm_config_returns_configured_status_when_all_files_present() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
@@ -173,7 +180,9 @@ async def test_confirm_config_returns_configured_status_when_all_files_present()
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: (
+            b"{}" if filename.endswith(".json") else b"x"
+        )
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(return_value=_sample_exam())
@@ -211,14 +220,14 @@ async def test_confirm_config_raises_missing_files_error_when_devoir_absent() ->
     )
 
     with pytest.raises(ExamConfigMissingFilesError) as excinfo:
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
     assert "devoir.json" in excinfo.value.missing_filenames
 
 
 @pytest.mark.asyncio
-async def test_confirm_config_raises_missing_files_error_when_correction_absent() -> None:
+async def test_confirm_config_raises_missing_files_error_when_correction_absent() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     presence = {name: True for name in CONFIG_FILES}
@@ -235,9 +244,7 @@ async def test_confirm_config_raises_missing_files_error_when_correction_absent(
     )
 
     with pytest.raises(ExamConfigMissingFilesError):
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
 
 
 @pytest.mark.asyncio
@@ -258,13 +265,13 @@ async def test_confirm_config_raises_missing_files_error_when_prompt_absent() ->
     )
 
     with pytest.raises(ExamConfigMissingFilesError):
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
 
 
 @pytest.mark.asyncio
-async def test_confirm_config_raises_missing_files_error_when_grille_notation_absent() -> None:
+async def test_confirm_config_raises_missing_files_error_when_grille_notation_absent() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     presence = {name: True for name in CONFIG_FILES}
@@ -281,9 +288,7 @@ async def test_confirm_config_raises_missing_files_error_when_grille_notation_ab
     )
 
     with pytest.raises(ExamConfigMissingFilesError):
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
 
 
 @pytest.mark.asyncio
@@ -314,14 +319,14 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_devoir() -
     )
 
     with pytest.raises(ExamConfigInvalidJsonError) as excinfo:
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
     assert excinfo.value.filename == "devoir.json"
 
 
 @pytest.mark.asyncio
-async def test_confirm_config_raises_invalid_json_error_for_malformed_correction() -> None:
+async def test_confirm_config_raises_invalid_json_error_for_malformed_correction() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
@@ -348,14 +353,14 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_correction
     )
 
     with pytest.raises(ExamConfigInvalidJsonError) as excinfo:
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
     assert excinfo.value.filename == "correction.json"
 
 
 @pytest.mark.asyncio
-async def test_confirm_config_raises_invalid_json_error_for_malformed_grille_notation() -> None:
+async def test_confirm_config_raises_invalid_json_error_for_malformed_grille_notation() -> (
+    None
+):
     ownership = Mock()
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
@@ -382,9 +387,7 @@ async def test_confirm_config_raises_invalid_json_error_for_malformed_grille_not
     )
 
     with pytest.raises(ExamConfigInvalidJsonError) as excinfo:
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
     assert excinfo.value.filename == "grille_notation.json"
 
 
@@ -398,7 +401,9 @@ async def test_confirm_config_saves_config_s3_keys_to_repository() -> None:
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: (
+            b"{}" if filename.endswith(".json") else b"x"
+        )
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(return_value=_sample_exam())
@@ -427,7 +432,9 @@ async def test_confirm_config_overwrites_previous_keys_on_re_upload() -> None:
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: (
+            b"{}" if filename.endswith(".json") else b"x"
+        )
     )
     repo = Mock()
     repo.get_exam_for_config = AsyncMock(
@@ -451,7 +458,9 @@ async def test_confirm_config_raises_wrong_status_when_exam_ready() -> None:
     ownership.verify_teacher_owns_exam = AsyncMock()
     storage = Mock()
     repo = Mock()
-    repo.get_exam_for_config = AsyncMock(return_value=_sample_exam(status=ExamStatus.READY))
+    repo.get_exam_for_config = AsyncMock(
+        return_value=_sample_exam(status=ExamStatus.READY)
+    )
 
     use_case = ConfirmExamConfigUseCase(
         exam_ownership=ownership,
@@ -460,16 +469,16 @@ async def test_confirm_config_raises_wrong_status_when_exam_ready() -> None:
     )
 
     with pytest.raises(ExamConfigWrongStatusError):
-        await use_case.execute(
-            ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1")
-        )
+        await use_case.execute(ConfirmExamConfigCommand(teacher_id="t1", exam_id="e1"))
 
 
 # --- S3ExamConfigStorage ---
 
 
 @pytest.mark.asyncio
-async def test_generate_upload_urls_calls_presigned_post_for_each_of_four_config_files() -> None:
+async def test_generate_upload_urls_calls_presigned_post_for_each_of_four_config_files() -> (
+    None
+):
     client = AsyncMock()
     client.generate_presigned_post = AsyncMock(
         return_value={"url": "https://u", "fields": {"key": "k"}}
@@ -551,7 +560,9 @@ async def test_all_files_exist_returns_false_for_absent_file() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_file_bytes_raises_missing_files_error_when_object_not_found() -> None:
+async def test_get_file_bytes_raises_missing_files_error_when_object_not_found() -> (
+    None
+):
     client = AsyncMock()
     client.get_object = AsyncMock(
         side_effect=ClientError(
@@ -586,7 +597,9 @@ def config_client_bundle() -> tuple[TestClient, Mock, Mock, Mock]:
         return_value={name: True for name in CONFIG_FILES}
     )
     storage.get_file_bytes = AsyncMock(
-        side_effect=lambda *, exam_id, filename: b"{}" if filename.endswith(".json") else b"x"
+        side_effect=lambda *, exam_id, filename: (
+            b"{}" if filename.endswith(".json") else b"x"
+        )
     )
 
     repo = Mock()

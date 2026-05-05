@@ -8,7 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 
 from exam_api.api.dependencies import CurrentTeacher, require_teacher
-from exam_api.composition import get_exam_config_repository, get_exam_ownership_repository
+from exam_api.composition import (
+    get_exam_config_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.application.confirm_exam_config import (
     ConfirmExamConfigCommand,
     ConfirmExamConfigUseCase,
@@ -57,7 +60,9 @@ def get_exam_config_storage(request: Request) -> ExamConfigStoragePort:
 
 
 def provide_get_upload_urls_use_case(
-    exam_ownership: Annotated[ExamOwnershipPort, Depends(get_exam_ownership_repository)],
+    exam_ownership: Annotated[
+        ExamOwnershipPort, Depends(get_exam_ownership_repository)
+    ],
     config_storage: Annotated[ExamConfigStoragePort, Depends(get_exam_config_storage)],
 ) -> GetExamConfigUploadUrlsUseCase:
     return GetExamConfigUploadUrlsUseCase(
@@ -67,9 +72,13 @@ def provide_get_upload_urls_use_case(
 
 
 def provide_confirm_config_use_case(
-    exam_ownership: Annotated[ExamOwnershipPort, Depends(get_exam_ownership_repository)],
+    exam_ownership: Annotated[
+        ExamOwnershipPort, Depends(get_exam_ownership_repository)
+    ],
     config_storage: Annotated[ExamConfigStoragePort, Depends(get_exam_config_storage)],
-    config_repository: Annotated[ExamConfigRepositoryPort, Depends(get_exam_config_repository)],
+    config_repository: Annotated[
+        ExamConfigRepositoryPort, Depends(get_exam_config_repository)
+    ],
 ) -> ConfirmExamConfigUseCase:
     return ConfirmExamConfigUseCase(
         exam_ownership=exam_ownership,
@@ -118,7 +127,9 @@ async def get_config_upload_urls(
 async def confirm_config(
     exam_id: str,
     current_teacher: Annotated[CurrentTeacher, Depends(require_teacher)],
-    use_case: Annotated[ConfirmExamConfigUseCase, Depends(provide_confirm_config_use_case)],
+    use_case: Annotated[
+        ConfirmExamConfigUseCase, Depends(provide_confirm_config_use_case)
+    ],
 ) -> ConfirmConfigResponse:
     try:
         result = await use_case.execute(

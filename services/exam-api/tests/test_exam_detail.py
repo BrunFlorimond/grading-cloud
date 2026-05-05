@@ -142,7 +142,6 @@ async def test_list_exam_student_statuses_propagates_invalid_cursor_error() -> N
         )
 
 
-
 # --- exam_router GET /exams/{exam_id} ---
 
 

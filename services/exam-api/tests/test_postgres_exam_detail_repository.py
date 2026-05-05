@@ -9,14 +9,18 @@ import pytest
 
 from exam_api.domain.errors import ExamNotFoundError, InvalidExamListCursorError
 from exam_api.infrastructure.orm import AssignmentORM, StudentAssignmentORM
-from exam_api.infrastructure.postgres_exam_detail_repository import PostgresExamDetailRepository
-from exam_api.ports.exam_detail_repository_port import ExamDetail, StatusCounts
+from exam_api.infrastructure.postgres_exam_detail_repository import (
+    PostgresExamDetailRepository,
+)
+from exam_api.ports.exam_detail_repository_port import ExamDetail
 
 EXAM_ID = "550e8400-e29b-41d4-a716-446655440000"
 TEACHER_ID = "660e8400-e29b-41d4-a716-446655440000"
 
 
-def _mock_assignment_row(exam_id: str = EXAM_ID, teacher_id: str = TEACHER_ID) -> MagicMock:
+def _mock_assignment_row(
+    exam_id: str = EXAM_ID, teacher_id: str = TEACHER_ID
+) -> MagicMock:
     row = MagicMock(spec=AssignmentORM)
     row.id = uuid.UUID(exam_id)
     row.created_by = uuid.UUID(teacher_id)

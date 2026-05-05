@@ -21,9 +21,13 @@ class TeacherORM(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     email: Mapped[str] = mapped_column(Text, nullable=False)
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-    assignments: Mapped[list[TeacherAssignmentORM]] = relationship(back_populates="teacher")
+    assignments: Mapped[list[TeacherAssignmentORM]] = relationship(
+        back_populates="teacher"
+    )
 
 
 class StudentORM(Base):
@@ -32,33 +36,59 @@ class StudentORM(Base):
     # id = Cognito sub; created on first authenticated login, not at enrollment time
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     email: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class AssignmentORM(Base):
     __tablename__ = "assignment"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
     title: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teacher.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("teacher.id"), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="created")
     description: Mapped[str | None] = mapped_column(Text)
     subject: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    pipeline_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    pipeline_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    pipeline_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    pipeline_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
-    teachers: Mapped[list[TeacherAssignmentORM]] = relationship(back_populates="assignment")
-    students: Mapped[list[StudentAssignmentORM]] = relationship(back_populates="assignment")
+    teachers: Mapped[list[TeacherAssignmentORM]] = relationship(
+        back_populates="assignment"
+    )
+    students: Mapped[list[StudentAssignmentORM]] = relationship(
+        back_populates="assignment"
+    )
 
 
 class TeacherAssignmentORM(Base):
     __tablename__ = "teacher_assignment"
 
-    teacher_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teacher.id", ondelete="CASCADE"), primary_key=True)
-    assignment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assignment.id", ondelete="CASCADE"), primary_key=True)
+    teacher_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teacher.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assignment.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="owner")
-    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     teacher: Mapped[TeacherORM] = relationship(back_populates="assignments")
     assignment: Mapped[AssignmentORM] = relationship(back_populates="teachers")
@@ -67,8 +97,14 @@ class TeacherAssignmentORM(Base):
 class StudentAssignmentORM(Base):
     __tablename__ = "student_assignment"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    assignment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assignment.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("assignment.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     # school-assigned ID (set at enrollment); may differ from cognito_sub
     student_id: Mapped[str] = mapped_column(Text, nullable=False)
     # set when the student activates their Cognito account via the invite flow
@@ -77,8 +113,12 @@ class StudentAssignmentORM(Base):
     prenom: Mapped[str] = mapped_column(Text, nullable=False)
     classe: Mapped[str] = mapped_column(Text, nullable=False)
     email: Mapped[str | None] = mapped_column(Text)
-    submission_status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
+    submission_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING"
+    )
     pdf_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    enrolled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     assignment: Mapped[AssignmentORM] = relationship(back_populates="students")

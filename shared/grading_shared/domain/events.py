@@ -29,4 +29,3 @@ class PipelineEvent(StrictModel):
     student_id: str | None = None
     batch_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-

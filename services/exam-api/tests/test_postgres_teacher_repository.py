@@ -8,12 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from exam_api.domain.teacher import Teacher
-from exam_api.infrastructure.postgres_teacher_repository import PostgresTeacherRepository
+from exam_api.infrastructure.postgres_teacher_repository import (
+    PostgresTeacherRepository,
+)
 
 COGNITO_SUB = "550e8400-e29b-41d4-a716-446655440000"
 
 
-def _mock_execute_returning(teacher_id: uuid.UUID, email: str, full_name: str) -> AsyncMock:
+def _mock_execute_returning(
+    teacher_id: uuid.UUID, email: str, full_name: str
+) -> AsyncMock:
     row = MagicMock()
     row.id = teacher_id
     row.email = email
@@ -55,9 +59,10 @@ async def test_upsert_teacher_passes_cognito_sub_as_uuid_id() -> None:
     )
 
     repo = PostgresTeacherRepository(session)
-    await repo.upsert_teacher(cognito_sub=COGNITO_SUB, email="t@school.fr", full_name="T")
+    await repo.upsert_teacher(
+        cognito_sub=COGNITO_SUB, email="t@school.fr", full_name="T"
+    )
 
-    stmt = session.execute.await_args.args[0]
     # The INSERT statement must be compiled — verify session.execute was called once
     session.execute.assert_awaited_once()
 

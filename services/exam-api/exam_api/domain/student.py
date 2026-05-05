@@ -32,15 +32,3 @@ class StudentAssignment(StrictModel):
     classe: str
     email: EmailStr | None = None
     submission_status: SubmissionStatus = SubmissionStatus.PENDING
-
-
-# Backward-compat alias — existing use cases and ports still reference EnrolledStudent.
-# exam_id maps to assignment_id; kept until all call-sites are updated.
-class EnrolledStudent(StrictModel):
-    student_id: str
-    exam_id: str
-    nom: str
-    prenom: str
-    classe: str
-    email: EmailStr | None = None
-    submission_status: SubmissionStatus = SubmissionStatus.PENDING

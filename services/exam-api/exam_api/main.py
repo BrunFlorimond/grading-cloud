@@ -16,7 +16,9 @@ from exam_api.api.student_router import router as student_router
 from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
 from exam_api.infrastructure.db import _get_engine
 from exam_api.infrastructure.s3_exam_config_storage import S3ExamConfigStorage
-from exam_api.infrastructure.student_invite_adapter import CognitoSesStudentInviteAdapter
+from exam_api.infrastructure.student_invite_adapter import (
+    CognitoSesStudentInviteAdapter,
+)
 
 
 @asynccontextmanager
@@ -28,7 +30,9 @@ async def _lifespan(app: FastAPI):
 
     exam_config_bucket = os.getenv("EXAM_CONFIG_BUCKET")
     if exam_config_bucket:
-        app.state.exam_config_storage = S3ExamConfigStorage(bucket_name=exam_config_bucket)
+        app.state.exam_config_storage = S3ExamConfigStorage(
+            bucket_name=exam_config_bucket
+        )
 
     engine = _get_engine()
     yield

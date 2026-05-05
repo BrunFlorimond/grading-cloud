@@ -36,7 +36,9 @@ class ChangeStudentPasswordUseCase:
     def __init__(self, auth_service: AuthServicePort) -> None:
         self._auth = auth_service
 
-    async def execute(self, command: ChangeStudentPasswordCommand) -> ChangeStudentPasswordResult:
+    async def execute(
+        self, command: ChangeStudentPasswordCommand
+    ) -> ChangeStudentPasswordResult:
         tokens = await self._auth.respond_to_new_password_challenge(
             email=str(command.email),
             session=command.session,

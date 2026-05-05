@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, Duration, Stack
+from aws_cdk import CfnOutput, CfnParameter, Duration, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -20,12 +20,23 @@ class ComputeStack(Stack):
         files_bucket: s3.IBucket,
         vpc: ec2.IVpc,
         db_secret: secretsmanager.ISecret,
+        db_endpoint: str,
+        db_name: str,
+        user_pool_id: str,
+        app_client_id: str,
         alb_sg: ec2.ISecurityGroup,
         fargate_sg: ec2.ISecurityGroup,
         **kwargs: object,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
         # All SGs are pre-wired in DatabaseStack — no new rules created here.
+
+        ses_from_address = CfnParameter(
+            self,
+            "SesFromAddress",
+            type="String",
+            description="Verified SES sender email used for student invitations.",
+        ).value_as_string
 
         # ── ECR repositories ─────────────────────────────────────────────────
         self.exam_api_repository = ecr.Repository(
@@ -83,6 +94,26 @@ class ComputeStack(Stack):
             self, "GradingCluster", vpc=vpc, cluster_name="grading-cluster"
         )
 
+        # Shared env + secrets used by both the long-running service and the
+        # one-shot migration task — defined once, applied to both containers.
+        container_environment = {
+            "FILES_BUCKET_NAME": files_bucket.bucket_name,
+            "EXAM_CONFIG_BUCKET": files_bucket.bucket_name,
+            "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
+            "EVENT_BUS_NAME": event_bus.event_bus_name,
+            "DB_HOST": db_endpoint,
+            "DB_PORT": "5432",
+            "DB_NAME": db_name,
+            "COGNITO_USER_POOL_ID": user_pool_id,
+            "COGNITO_APP_CLIENT_ID": app_client_id,
+            "AWS_REGION": self.region,
+            "SES_FROM_ADDRESS": ses_from_address,
+        }
+        container_secrets = {
+            "DB_USERNAME": ecs.Secret.from_secrets_manager(db_secret, "username"),
+            "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
+        }
+
         task_definition = ecs.FargateTaskDefinition(
             self, "ExamApiTaskDefinition", cpu=512, memory_limit_mib=1024
         )
@@ -97,12 +128,8 @@ class ComputeStack(Stack):
                 stream_prefix="exam-api",
                 log_retention=logs.RetentionDays.ONE_MONTH,
             ),
-            environment={
-                "FILES_BUCKET_NAME": files_bucket.bucket_name,
-                "DB_SECRET_ARN": db_secret.secret_arn,
-                "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
-                "EVENT_BUS_NAME": event_bus.event_bus_name,
-            },
+            environment=container_environment,
+            secrets=container_secrets,
             port_mappings=[ecs.PortMapping(container_port=8000)],
         )
 
@@ -117,6 +144,33 @@ class ComputeStack(Stack):
             service_name="exam-api",
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             security_groups=[fargate_sg],
+        )
+
+        # ── One-shot migration task (Alembic) ────────────────────────────────
+        # Same image, same env/secrets, same SG — only the command differs.
+        # Trigger with: aws ecs run-task --cluster <cluster> --task-definition exam-api-migrations
+        #               --launch-type FARGATE --network-configuration ... (see CfnOutputs).
+        migration_task_definition = ecs.FargateTaskDefinition(
+            self,
+            "ExamApiMigrationTaskDefinition",
+            family="exam-api-migrations",
+            cpu=256,
+            memory_limit_mib=512,
+        )
+        migration_task_definition.add_container(
+            "MigrationsContainer",
+            image=ecs.ContainerImage.from_ecr_repository(
+                self.exam_api_repository, "latest"
+            ),
+            container_name="migrations",
+            command=["alembic", "upgrade", "head"],
+            essential=True,
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="exam-api-migrations",
+                log_retention=logs.RetentionDays.ONE_MONTH,
+            ),
+            environment=container_environment,
+            secrets=container_secrets,
         )
 
         # ── ALB (explicit construction — avoids ecs_patterns SG auto-wiring) ─
@@ -223,4 +277,22 @@ class ComputeStack(Stack):
             "EventBusName",
             value=event_bus.event_bus_name,
             export_name="GradingEventBusName",
+        )
+        CfnOutput(
+            self,
+            "MigrationTaskDefinitionArn",
+            value=migration_task_definition.task_definition_arn,
+            export_name="GradingMigrationTaskDefinitionArn",
+        )
+        CfnOutput(
+            self,
+            "FargateSecurityGroupId",
+            value=fargate_sg.security_group_id,
+            export_name="GradingFargateSecurityGroupId",
+        )
+        CfnOutput(
+            self,
+            "PublicSubnetIds",
+            value=",".join([s.subnet_id for s in vpc.public_subnets]),
+            export_name="GradingPublicSubnetIds",
         )

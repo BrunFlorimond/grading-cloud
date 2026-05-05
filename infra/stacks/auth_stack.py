@@ -17,7 +17,7 @@ class AuthStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # RBAC uses Cognito pool groups (teachers / students / admin) on the ID token.
-        user_pool = cognito.UserPool(
+        self.user_pool = user_pool = cognito.UserPool(
             self,
             "GradingUserPool",
             user_pool_name="grading-user-pool",
@@ -59,7 +59,7 @@ class AuthStack(Stack):
             description="Administrators who may register new teachers via the API.",
         )
 
-        user_pool_client = user_pool.add_client(
+        self.user_pool_client = user_pool_client = user_pool.add_client(
             "GradingSpaClient",
             user_pool_client_name="grading-spa-client",
             generate_secret=False,

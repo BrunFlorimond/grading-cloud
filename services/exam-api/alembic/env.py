@@ -1,10 +1,10 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from exam_api.infrastructure.db import get_database_url
 from exam_api.infrastructure.orm import Base
 
 config = context.config
@@ -15,9 +15,7 @@ target_metadata = Base.metadata
 
 
 def _get_url() -> str:
-    return os.environ.get("DATABASE_URL") or config.get_main_option(
-        "sqlalchemy.url", ""
-    )
+    return get_database_url() or config.get_main_option("sqlalchemy.url", "")
 
 
 def run_migrations_offline() -> None:

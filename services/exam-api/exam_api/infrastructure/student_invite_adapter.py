@@ -10,6 +10,7 @@ import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from exam_api.cognito_group_names import COGNITO_STUDENT_GROUP
+from exam_api.infrastructure.aws_client_config import build_client_kwargs
 from exam_api.ports.student_invite_port import (
     InviteStudentResult,
     StudentInviteServicePort,
@@ -51,8 +52,12 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                 student_email=student_email,
                 exam_id=exam_id,
             )
-        async with self._session.create_client("cognito-idp") as cognito:
-            async with self._session.create_client("ses") as ses:
+        async with self._session.create_client(
+            "cognito-idp", **build_client_kwargs("cognito-idp")
+        ) as cognito:
+            async with self._session.create_client(
+                "ses", **build_client_kwargs("ses")
+            ) as ses:
                 return await self._invite_with_clients(
                     cognito,
                     ses,

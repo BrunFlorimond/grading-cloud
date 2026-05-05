@@ -10,6 +10,7 @@ import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from exam_api.domain.errors import ExamConfigMissingFilesError
+from exam_api.infrastructure.aws_client_config import build_client_kwargs
 from exam_api.ports.exam_config_storage_port import CONFIG_FILES
 
 _UPLOAD_URL_TTL_SECONDS = 900  # 15 minutes
@@ -50,9 +51,10 @@ class S3ExamConfigStorage:
     async def _use_client(self, fn: Callable[[Any], Awaitable[T]]) -> T:
         if self._injected_client is not None:
             return await fn(self._injected_client)
-        async with self._session.create_client(
-            "s3", region_name=self._region_name()
-        ) as client:
+        kwargs = build_client_kwargs("s3")
+        if "region_name" not in kwargs:
+            kwargs["region_name"] = self._region_name()
+        async with self._session.create_client("s3", **kwargs) as client:
             return await fn(client)
 
     def config_object_key(self, *, exam_id: str, filename: str) -> str:

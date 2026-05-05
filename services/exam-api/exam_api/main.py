@@ -64,12 +64,21 @@ def _build_jwt_verifier() -> CognitoJwtVerifier:
     user_pool_id = os.getenv("COGNITO_USER_POOL_ID")
     app_client_id = os.getenv("COGNITO_APP_CLIENT_ID")
     aws_region = os.getenv("AWS_REGION")
-    if not user_pool_id or not app_client_id or not aws_region:
+    issuer_override = os.getenv("COGNITO_ISSUER_URL")
+    if not user_pool_id or not app_client_id:
         raise RuntimeError(
-            "Missing Cognito JWT configuration: set COGNITO_USER_POOL_ID, "
-            "COGNITO_APP_CLIENT_ID and AWS_REGION."
+            "Missing Cognito JWT configuration: set COGNITO_USER_POOL_ID and "
+            "COGNITO_APP_CLIENT_ID."
         )
-    issuer = f"https://cognito-idp.{aws_region}.amazonaws.com/{user_pool_id}"
+    if issuer_override:
+        issuer = issuer_override
+    else:
+        if not aws_region:
+            raise RuntimeError(
+                "Missing Cognito JWT configuration: set AWS_REGION or "
+                "COGNITO_ISSUER_URL."
+            )
+        issuer = f"https://cognito-idp.{aws_region}.amazonaws.com/{user_pool_id}"
     return CognitoJwtVerifier(issuer=issuer, audience=app_client_id)
 
 

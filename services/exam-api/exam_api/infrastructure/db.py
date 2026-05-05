@@ -19,10 +19,29 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
+def get_database_url() -> str:
+    """Resolve DATABASE_URL.
+
+    Priority:
+    1. ``DATABASE_URL`` env var (used in local dev / tunneled migrations).
+    2. Components ``DB_HOST``, ``DB_PORT`` (default 5432), ``DB_NAME``,
+       ``DB_USERNAME``, ``DB_PASSWORD`` — injected by ECS in production.
+    """
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return url
+    host = os.environ["DB_HOST"]
+    port = os.environ.get("DB_PORT", "5432")
+    name = os.environ["DB_NAME"]
+    user = os.environ["DB_USERNAME"]
+    password = os.environ["DB_PASSWORD"]
+    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{name}"
+
+
 def _get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
-        _engine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
+        _engine = create_async_engine(get_database_url(), pool_pre_ping=True)
     return _engine
 
 

@@ -14,7 +14,7 @@ from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import router as invite_router
 from exam_api.api.student_router import router as student_router
 from exam_api.infrastructure.cognito_jwt_verifier import CognitoJwtVerifier
-from exam_api.infrastructure.db import _get_engine
+from exam_api.infrastructure.db import _get_engine, get_database_url
 from exam_api.infrastructure.s3_exam_config_storage import S3ExamConfigStorage
 from exam_api.infrastructure.student_invite_adapter import (
     CognitoSesStudentInviteAdapter,
@@ -23,7 +23,8 @@ from exam_api.infrastructure.student_invite_adapter import (
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    _require_env("DATABASE_URL")
+    # Fail fast if DB config is incomplete (DATABASE_URL or DB_HOST/USER/PASSWORD/NAME).
+    get_database_url()
 
     app.state.jwt_verifier = _build_jwt_verifier()
     app.state.student_invite_service = _build_student_invite_service()

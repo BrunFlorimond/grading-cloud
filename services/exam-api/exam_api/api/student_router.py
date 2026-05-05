@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from exam_api.api.dependencies import (
-    CurrentTeacher,
-    require_teacher,
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_detail_repository,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.add_students import (
@@ -103,17 +104,8 @@ class ListStudentStatusesResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Dependency providers
+# Use-case providers (repository wiring: ``exam_api.composition``)
 # ---------------------------------------------------------------------------
-
-
-def get_exam_detail_repository(request: Request) -> ExamDetailRepositoryPort:
-    repository = getattr(request.app.state, "exam_detail_repository", None)
-    if not isinstance(repository, ExamDetailRepositoryPort):
-        raise RuntimeError(
-            "Missing exam detail repository. Set app.state.exam_detail_repository."
-        )
-    return repository
 
 
 def provide_list_student_statuses_use_case(
@@ -122,15 +114,6 @@ def provide_list_student_statuses_use_case(
     ],
 ) -> ListExamStudentStatusesUseCase:
     return ListExamStudentStatusesUseCase(exam_detail_repository=repository)
-
-
-def get_enrollment_repository(request: Request) -> StudentEnrollmentRepositoryPort:
-    repository = getattr(request.app.state, "student_enrollment_repository", None)
-    if not isinstance(repository, StudentEnrollmentRepositoryPort):
-        raise RuntimeError(
-            "Missing enrollment repository. Set app.state.student_enrollment_repository."
-        )
-    return repository
 
 
 def provide_add_students_use_case(

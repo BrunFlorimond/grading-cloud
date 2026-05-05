@@ -36,7 +36,9 @@ class CognitoAuthAdapter(AuthServicePort):
         # Injected low-level client for tests (sync Mock methods replaced by AsyncMock in tests).
         self._injected_client = client
 
-    async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+    async def register_teacher(
+        self, *, email: str, password: str, full_name: str
+    ) -> str:
         if self._injected_client is not None:
             return await self._register_teacher_with_client(
                 self._injected_client,
@@ -204,7 +206,9 @@ class CognitoAuthAdapter(AuthServicePort):
         auth_result = response.get("AuthenticationResult", {})
         return self._auth_tokens_from_result(auth_result)
 
-    async def login_student(self, *, email: str, password: str) -> AuthTokens | AuthChallenge:
+    async def login_student(
+        self, *, email: str, password: str
+    ) -> AuthTokens | AuthChallenge:
         if self._injected_client is not None:
             return await self._login_student_with_client(
                 self._injected_client,

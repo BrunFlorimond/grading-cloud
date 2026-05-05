@@ -169,7 +169,9 @@ async def test_login_raises_invalid_credentials_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cognito_register_admin_creates_user_sets_password_adds_to_group() -> None:
+async def test_cognito_register_admin_creates_user_sets_password_adds_to_group() -> (
+    None
+):
     cognito = Mock()
     cognito.admin_create_user = AsyncMock(
         return_value={

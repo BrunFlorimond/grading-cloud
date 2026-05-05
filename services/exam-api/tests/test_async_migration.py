@@ -52,7 +52,11 @@ def test_register_endpoint_uses_async_execute(auth_client: TestClient) -> None:
     response = auth_client.post(
         "/auth/register",
         headers={"Authorization": "Bearer x"},
-        json={"email": "t@example.com", "password": "StrongPassword123!", "full_name": "T"},
+        json={
+            "email": "t@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "T",
+        },
     )
 
     assert response.status_code == 201

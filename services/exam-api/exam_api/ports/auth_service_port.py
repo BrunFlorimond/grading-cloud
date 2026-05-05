@@ -24,7 +24,9 @@ class AuthChallenge(StrictModel):
 
 @runtime_checkable
 class AuthServicePort(Protocol):
-    async def register_teacher(self, *, email: str, password: str, full_name: str) -> str:
+    async def register_teacher(
+        self, *, email: str, password: str, full_name: str
+    ) -> str:
         """Create a Cognito user in the teachers group and return teacher_id (sub)."""
         ...
 
@@ -32,7 +34,9 @@ class AuthServicePort(Protocol):
         """Authenticate via USER_PASSWORD_AUTH and return JWT tokens."""
         ...
 
-    async def login_student(self, *, email: str, password: str) -> AuthTokens | AuthChallenge:
+    async def login_student(
+        self, *, email: str, password: str
+    ) -> AuthTokens | AuthChallenge:
         """Authenticate a student; may return a NEW_PASSWORD_REQUIRED challenge."""
         ...
 

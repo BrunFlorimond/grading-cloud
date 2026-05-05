@@ -61,4 +61,3 @@ class NotationPayload(StrictModel):
     criteres_niveau1: list[Niveau1Model] = Field(default_factory=list)
     totaux: TotauxModel
     meta: MetaModel
-

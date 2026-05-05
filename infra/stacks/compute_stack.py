@@ -1,18 +1,14 @@
-from aws_cdk import (
-    CfnOutput,
-    Duration,
-    Stack,
-    aws_dynamodb as dynamodb,
-    aws_ec2 as ec2,
-    aws_ecr as ecr,
-    aws_ecs as ecs,
-    aws_elasticloadbalancingv2 as elbv2,
-    aws_events as events,
-    aws_iam as iam,
-    aws_logs as logs,
-    aws_s3 as s3,
-    aws_sqs as sqs,
-)
+from aws_cdk import CfnOutput, Duration, Stack
+from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_ecr as ecr
+from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_elasticloadbalancingv2 as elbv2
+from aws_cdk import aws_events as events
+from aws_cdk import aws_iam as iam
+from aws_cdk import aws_logs as logs
+from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_secretsmanager as secretsmanager
+from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
 
@@ -22,11 +18,16 @@ class ComputeStack(Stack):
         scope: Construct,
         construct_id: str,
         files_bucket: s3.IBucket,
-        grading_table: dynamodb.ITable,
+        vpc: ec2.IVpc,
+        db_secret: secretsmanager.ISecret,
+        alb_sg: ec2.ISecurityGroup,
+        fargate_sg: ec2.ISecurityGroup,
         **kwargs: object,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        # All SGs are pre-wired in DatabaseStack — no new rules created here.
 
+        # ── ECR repositories ─────────────────────────────────────────────────
         self.exam_api_repository = ecr.Repository(
             self,
             "ExamApiRepository",
@@ -52,6 +53,7 @@ class ComputeStack(Stack):
             image_scan_on_push=True,
         )
 
+        # ── SQS ──────────────────────────────────────────────────────────────
         pipeline_dlq = sqs.Queue(
             self,
             "PipelineEventsDlq",
@@ -66,40 +68,30 @@ class ComputeStack(Stack):
             retention_period=Duration.days(4),
             visibility_timeout=Duration.minutes(5),
             dead_letter_queue=sqs.DeadLetterQueue(
-                max_receive_count=5,
-                queue=pipeline_dlq,
+                max_receive_count=5, queue=pipeline_dlq
             ),
             enforce_ssl=True,
         )
 
+        # ── EventBridge ──────────────────────────────────────────────────────
         event_bus = events.EventBus(
-            self,
-            "GradingEventBus",
-            event_bus_name="grading-event-bus",
+            self, "GradingEventBus", event_bus_name="grading-event-bus"
         )
 
-        vpc = ec2.Vpc(
-            self,
-            "GradingVpc",
-            max_azs=2,
-            nat_gateways=0,
-        )
+        # ── ECS ──────────────────────────────────────────────────────────────
         cluster = ecs.Cluster(
-            self,
-            "GradingCluster",
-            vpc=vpc,
-            cluster_name="grading-cluster",
+            self, "GradingCluster", vpc=vpc, cluster_name="grading-cluster"
         )
 
         task_definition = ecs.FargateTaskDefinition(
-            self,
-            "ExamApiTaskDefinition",
-            cpu=512,
-            memory_limit_mib=1024,
+            self, "ExamApiTaskDefinition", cpu=512, memory_limit_mib=1024
         )
+
         task_definition.add_container(
             "ExamApiContainer",
-            image=ecs.ContainerImage.from_ecr_repository(self.exam_api_repository, "latest"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                self.exam_api_repository, "latest"
+            ),
             container_name="exam-api",
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="exam-api",
@@ -107,7 +99,7 @@ class ComputeStack(Stack):
             ),
             environment={
                 "FILES_BUCKET_NAME": files_bucket.bucket_name,
-                "GRADING_TABLE_NAME": grading_table.table_name,
+                "DB_SECRET_ARN": db_secret.secret_arn,
                 "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
             },
@@ -120,29 +112,33 @@ class ComputeStack(Stack):
             cluster=cluster,
             task_definition=task_definition,
             desired_count=0,
+            # assign_public_ip required in public subnet without NAT gateway (ECR pulls)
             assign_public_ip=True,
             service_name="exam-api",
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            security_groups=[fargate_sg],
         )
 
+        # ── ALB (explicit construction — avoids ecs_patterns SG auto-wiring) ─
         alb = elbv2.ApplicationLoadBalancer(
             self,
             "ExamApiAlb",
             vpc=vpc,
             internet_facing=True,
+            security_group=alb_sg,  # pre-wired in DatabaseStack
             load_balancer_name="grading-exam-api-alb",
         )
-        listener = alb.add_listener("HttpListener", port=80, open=True)
+        listener = alb.add_listener("HttpListener", port=80, open=False)
         listener.add_targets(
             "ExamApiTargets",
             port=8000,
             targets=[service],
             health_check=elbv2.HealthCheck(
-                path="/health",
-                healthy_http_codes="200-399",
+                path="/health", healthy_http_codes="200-399"
             ),
         )
 
+        # ── IAM ──────────────────────────────────────────────────────────────
         task_role = task_definition.task_role
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
@@ -154,34 +150,11 @@ class ComputeStack(Stack):
                     "s3:DeleteObject",
                     "s3:ListBucket",
                 ],
-                resources=[
-                    files_bucket.bucket_arn,
-                    files_bucket.arn_for_objects("*"),
-                ],
+                resources=[files_bucket.bucket_arn, files_bucket.arn_for_objects("*")],
             )
         )
-        task_role.add_to_principal_policy(
-            iam.PolicyStatement(
-                sid="DynamoDbAccess",
-                effect=iam.Effect.ALLOW,
-                actions=[
-                    "dynamodb:BatchGetItem",
-                    "dynamodb:BatchWriteItem",
-                    "dynamodb:ConditionCheckItem",
-                    "dynamodb:DeleteItem",
-                    "dynamodb:GetItem",
-                    "dynamodb:PutItem",
-                    "dynamodb:Query",
-                    "dynamodb:TransactGetItems",
-                    "dynamodb:TransactWriteItems",
-                    "dynamodb:UpdateItem",
-                ],
-                resources=[
-                    grading_table.table_arn,
-                    f"{grading_table.table_arn}/index/*",
-                ],
-            )
-        )
+        # Scoped grant — no wildcard; adds GetSecretValue + DescribeSecret on this ARN
+        db_secret.grant_read(task_role)
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 sid="SqsAccess",
@@ -194,23 +167,15 @@ class ComputeStack(Stack):
                     "sqs:ReceiveMessage",
                     "sqs:SendMessage",
                 ],
-                resources=[
-                    pipeline_events_queue.queue_arn,
-                    pipeline_dlq.queue_arn,
-                ],
+                resources=[pipeline_events_queue.queue_arn, pipeline_dlq.queue_arn],
             )
         )
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 sid="SesAccess",
                 effect=iam.Effect.ALLOW,
-                actions=[
-                    "ses:SendEmail",
-                    "ses:SendRawEmail",
-                ],
-                resources=[
-                    f"arn:aws:ses:{self.region}:{self.account}:identity/*",
-                ],
+                actions=["ses:SendEmail", "ses:SendRawEmail"],
+                resources=[f"arn:aws:ses:{self.region}:{self.account}:identity/*"],
             )
         )
         task_role.add_to_principal_policy(
@@ -222,29 +187,12 @@ class ComputeStack(Stack):
             )
         )
 
+        # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(
             self,
             "ExamApiRepositoryUri",
             value=self.exam_api_repository.repository_uri,
             export_name="GradingExamApiRepositoryUri",
-        )
-        CfnOutput(
-            self,
-            "SpreadsheetConverterRepositoryUri",
-            value=self.spreadsheet_converter_repository.repository_uri,
-            export_name="GradingSpreadsheetConverterRepositoryUri",
-        )
-        CfnOutput(
-            self,
-            "BatchPollerRepositoryUri",
-            value=self.batch_poller_repository.repository_uri,
-            export_name="GradingBatchPollerRepositoryUri",
-        )
-        CfnOutput(
-            self,
-            "PdfGeneratorRepositoryUri",
-            value=self.pdf_generator_repository.repository_uri,
-            export_name="GradingPdfGeneratorRepositoryUri",
         )
         CfnOutput(
             self,
@@ -269,12 +217,6 @@ class ComputeStack(Stack):
             "PipelineEventsQueueUrl",
             value=pipeline_events_queue.queue_url,
             export_name="GradingPipelineEventsQueueUrl",
-        )
-        CfnOutput(
-            self,
-            "PipelineEventsQueueArn",
-            value=pipeline_events_queue.queue_arn,
-            export_name="GradingPipelineEventsQueueArn",
         )
         CfnOutput(
             self,

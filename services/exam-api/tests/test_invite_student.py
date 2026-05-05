@@ -11,14 +11,16 @@ from fastapi.testclient import TestClient
 from grading_shared.domain.exam import Exam, ExamStatus
 from jose import JWTError
 
-from exam_api.api.dependencies import (
-    CurrentTeacher,
-    get_verify_exam_ownership_use_case,
-    require_teacher,
-    verify_teacher_exam_ownership,
-)
+from exam_api.api.dependencies import CurrentTeacher, require_teacher
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.invite_router import provide_invite_use_case, router
+from exam_api.composition import (
+    get_invite_exam_repository,
+    get_invite_scope_repository,
+    get_student_scope_repository,
+    get_verify_exam_ownership_use_case,
+    verify_teacher_exam_ownership,
+)
 from exam_api.application.invite_student import (
     InviteStudentCommand,
     InviteStudentResult,
@@ -63,6 +65,9 @@ def client() -> TestClient:
     invite_repository.save_notation_payload = AsyncMock()
     invite_repository.upsert_student_scope = AsyncMock()
     invite_repository.get_student_scope = AsyncMock()
+    app.dependency_overrides[get_invite_exam_repository] = lambda: invite_repository
+    app.dependency_overrides[get_invite_scope_repository] = lambda: invite_repository
+    app.dependency_overrides[get_student_scope_repository] = lambda: invite_repository
     app.state.invite_repository = invite_repository
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     jwt_verifier.decode_and_verify_token = AsyncMock(
@@ -142,7 +147,6 @@ async def test_use_case_returns_new_invite_result() -> None:
     assert result == InviteStudentResult(
         student=Student(
             student_id="student-sub-123",
-            exam_id="exam-1",
             email="student@example.com",
         ),
         re_invited=False,
@@ -377,7 +381,6 @@ def test_api_returns_200_on_successful_invite(client: TestClient) -> None:
         return_value=InviteStudentResult(
             student=Student(
                 student_id="student-sub-123",
-                exam_id="exam-1",
                 email="student@example.com",
             ),
             re_invited=False,
@@ -409,7 +412,6 @@ def test_api_returns_reinvited_true_on_reinvite(client: TestClient) -> None:
         return_value=InviteStudentResult(
             student=Student(
                 student_id="student-sub-existing",
-                exam_id="exam-1",
                 email="student@example.com",
             ),
             re_invited=True,
@@ -453,8 +455,8 @@ def test_api_returns_404_when_exam_not_found_at_ownership_verify(
     mock_verify_uc.execute = AsyncMock(
         side_effect=ExamNotFoundError("Exam exam-missing not found.")
     )
-    client.app.dependency_overrides[get_verify_exam_ownership_use_case] = (
-        lambda: mock_verify_uc
+    client.app.dependency_overrides[get_verify_exam_ownership_use_case] = lambda: (
+        mock_verify_uc
     )
     client.app.dependency_overrides.pop(verify_teacher_exam_ownership, None)
     client.app.dependency_overrides[require_teacher] = lambda: CurrentTeacher(
@@ -564,7 +566,6 @@ def test_student_scope_endpoint_returns_200_for_matching_student_scope(
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
-            exam_id="exam-1",
             email="student@example.com",
         )
     )
@@ -614,7 +615,6 @@ def test_student_scope_endpoint_ignores_custom_exam_id_claim(
     client.app.state.invite_repository.get_student_scope = AsyncMock(
         return_value=Student(
             student_id="student-sub-123",
-            exam_id="exam-from-path",
             email="student@example.com",
         )
     )

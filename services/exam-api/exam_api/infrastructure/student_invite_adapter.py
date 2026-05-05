@@ -10,7 +10,10 @@ import aiobotocore.session
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from exam_api.cognito_group_names import COGNITO_STUDENT_GROUP
-from exam_api.ports.student_invite_port import InviteStudentResult, StudentInviteServicePort
+from exam_api.ports.student_invite_port import (
+    InviteStudentResult,
+    StudentInviteServicePort,
+)
 
 
 class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
@@ -78,7 +81,9 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
                     {"Name": "email_verified", "Value": "true"},
                 ],
             )
-            cognito_sub = self._extract_user_sub(response.get("User", {}), student_email)
+            cognito_sub = self._extract_user_sub(
+                response.get("User", {}), student_email
+            )
         except ClientError as err:
             if self._extract_error_code(err) != "UsernameExistsException":
                 raise
@@ -147,7 +152,9 @@ class CognitoSesStudentInviteAdapter(StudentInviteServicePort):
 
     @staticmethod
     def _extract_user_sub(user_payload: dict[str, Any], student_email: str) -> str:
-        attributes = user_payload.get("UserAttributes") or user_payload.get("Attributes", [])
+        attributes = user_payload.get("UserAttributes") or user_payload.get(
+            "Attributes", []
+        )
         if not isinstance(attributes, list):
             raise RuntimeError(
                 f"Cognito response for {student_email} does not contain valid attributes."

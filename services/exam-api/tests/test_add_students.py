@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import base64
-import json
 import uuid
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
-from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.student_router import router as student_router
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_detail_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.application.add_students import (
     AddStudentsCommand,
     AddStudentsUseCase,
@@ -31,13 +33,7 @@ from exam_api.domain.errors import (
     InvalidExamListCursorError,
     StudentBatchTooLargeError,
 )
-from exam_api.domain.student import EnrolledStudent, SubmissionStatus
-from exam_api.infrastructure.dynamodb_exam_detail_repository import (
-    DynamoDbExamDetailRepository,
-)
-from exam_api.infrastructure.dynamodb_student_enrollment_repository import (
-    DynamoDbStudentEnrollmentRepository,
-)
+from exam_api.domain.student import StudentAssignment, SubmissionStatus
 from exam_api.ports.exam_detail_repository_port import (
     ExamDetailRepositoryPort,
     StudentPipelinePage,
@@ -59,11 +55,6 @@ def _uuid4_string(value: str) -> bool:
     return parsed.version == 4
 
 
-def _encode_lek_local(key: dict[str, object]) -> str:
-    raw = json.dumps(key, sort_keys=True).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
 # --- AddStudentsUseCase ---
 
 
@@ -71,17 +62,17 @@ def _encode_lek_local(key: dict[str, object]) -> str:
 async def test_add_students_returns_created_list() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     created = [
-        EnrolledStudent(
+        StudentAssignment(
             student_id="s1",
-            exam_id="e1",
+            assignment_id="e1",
             nom="Doe",
             prenom="Jane",
             classe="A",
             submission_status=SubmissionStatus.PENDING,
         ),
-        EnrolledStudent(
+        StudentAssignment(
             student_id="s2",
-            exam_id="e1",
+            assignment_id="e1",
             nom="Roe",
             prenom="John",
             classe="B",
@@ -121,7 +112,7 @@ async def test_add_students_returns_created_list() -> None:
 async def test_add_students_assigns_uuid_when_student_id_absent() -> None:
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
 
-    async def _capture(**kwargs: object) -> list[EnrolledStudent]:
+    async def _capture(**kwargs: object) -> list[StudentAssignment]:
         students = kwargs["students"]
         assert isinstance(students, list) and len(students) == 1
         return students
@@ -328,16 +319,19 @@ def students_api_client() -> TestClient:
 
     enrollment = Mock(spec=StudentEnrollmentRepositoryPort)
     enrollment.add_students = AsyncMock(side_effect=lambda **kwargs: kwargs["students"])
+    app.dependency_overrides[get_enrollment_repository] = lambda: enrollment
     app.state.student_enrollment_repository = enrollment
 
     exam_detail = Mock(spec=ExamDetailRepositoryPort)
     exam_detail.list_exam_student_statuses = AsyncMock(
         return_value=StudentPipelinePage(items=[], next_cursor=None),
     )
+    app.dependency_overrides[get_exam_detail_repository] = lambda: exam_detail
     app.state.exam_detail_repository = exam_detail
 
     ownership = Mock(spec=ExamOwnershipPort)
     ownership.verify_teacher_owns_exam = AsyncMock()
+    app.dependency_overrides[get_exam_ownership_repository] = lambda: ownership
     app.state.exam_ownership_repository = ownership
 
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
@@ -361,8 +355,6 @@ def test_post_students_requires_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(student_router)
-    app.state.student_enrollment_repository = Mock(spec=StudentEnrollmentRepositoryPort)
-    app.state.exam_ownership_repository = Mock(spec=ExamOwnershipPort)
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 
@@ -522,8 +514,6 @@ def test_get_students_requires_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(student_router)
-    app.state.student_enrollment_repository = Mock(spec=StudentEnrollmentRepositoryPort)
-    app.state.exam_ownership_repository = Mock(spec=ExamOwnershipPort)
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 
@@ -583,12 +573,10 @@ def test_get_students_passes_limit_and_cursor_to_use_case(
 def test_get_students_invalid_cursor_returns_422(
     students_api_client: TestClient,
 ) -> None:
-    ddb = AsyncMock()
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table",
-        dynamodb_client=ddb,
+    exam_detail = students_api_client.app.state.exam_detail_repository
+    exam_detail.list_exam_student_statuses = AsyncMock(
+        side_effect=InvalidExamListCursorError("Invalid pagination cursor.")
     )
-    students_api_client.app.state.exam_detail_repository = repo
 
     response = students_api_client.get(
         "/exams/exam-99/students?cursor=@@@@",
@@ -596,268 +584,3 @@ def test_get_students_invalid_cursor_returns_422(
     )
 
     assert response.status_code == 422
-    ddb.query.assert_not_called()
-
-
-def test_get_students_cursor_for_wrong_exam_returns_422(
-    students_api_client: TestClient,
-) -> None:
-    ddb = AsyncMock()
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table",
-        dynamodb_client=ddb,
-    )
-    students_api_client.app.state.exam_detail_repository = repo
-
-    wrong_cursor = _encode_lek_local(
-        {
-            "PK": {"S": "EXAM#other-exam"},
-            "SK": {"S": "STUDENT#s1"},
-        }
-    )
-    response = students_api_client.get(
-        f"/exams/exam-99/students?cursor={wrong_cursor}",
-        headers={"Authorization": "Bearer fake"},
-    )
-
-    assert response.status_code == 422
-    ddb.query.assert_not_called()
-
-
-# --- DynamoDbStudentEnrollmentRepository ---
-
-
-@pytest.mark.asyncio
-async def test_add_students_writes_correct_pk_sk() -> None:
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock()
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    students = [
-        EnrolledStudent(
-            student_id="stu-1",
-            exam_id="e1",
-            nom="N",
-            prenom="P",
-            classe="C",
-            submission_status=SubmissionStatus.PENDING,
-        )
-    ]
-
-    await repo.add_students(exam_id="e1", students=students)
-
-    items = client.transact_write_items.await_args.kwargs["TransactItems"]
-    assert len(items) == 1
-    item = items[0]["Put"]["Item"]
-    assert item["PK"]["S"] == "EXAM#e1"
-    assert item["SK"]["S"] == "STUDENT#stu-1"
-
-
-@pytest.mark.asyncio
-async def test_add_students_stores_all_fields() -> None:
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock()
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    students = [
-        EnrolledStudent(
-            student_id="stu-1",
-            exam_id="e1",
-            nom="Nom",
-            prenom="Prenom",
-            classe="Cl",
-            email="a@b.co",
-            submission_status=SubmissionStatus.PENDING,
-        )
-    ]
-
-    await repo.add_students(exam_id="e1", students=students)
-
-    item = client.transact_write_items.await_args.kwargs["TransactItems"][0]["Put"][
-        "Item"
-    ]
-    assert item["nom"]["S"] == "Nom"
-    assert item["prenom"]["S"] == "Prenom"
-    assert item["classe"]["S"] == "Cl"
-    assert item["email"]["S"] == "a@b.co"
-    assert item["submission_status"]["S"] == "PENDING"
-
-
-@pytest.mark.asyncio
-async def test_add_students_conditional_failure_raises_duplicate_error() -> None:
-    error_response = {
-        "Error": {
-            "Code": "TransactionCanceledException",
-            "Message": "Transaction cancelled",
-        },
-        "CancellationReasons": [
-            {
-                "Code": "ConditionalCheckFailed",
-                "Message": "The conditional request failed",
-            }
-        ],
-    }
-    err = ClientError(error_response, "TransactWriteItems")
-
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock(side_effect=err)
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    students = [
-        EnrolledStudent(
-            student_id="x",
-            exam_id="e1",
-            nom="N",
-            prenom="P",
-            classe="C",
-            submission_status=SubmissionStatus.PENDING,
-        )
-    ]
-
-    with pytest.raises(DuplicateStudentError):
-        await repo.add_students(exam_id="e1", students=students)
-
-
-@pytest.mark.asyncio
-async def test_list_exam_students_queries_correct_pk_prefix() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(return_value={"Items": [], "LastEvaluatedKey": None})
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    await repo.list_exam_students(exam_id="e1", limit=10, cursor=None)
-
-    kwargs = client.query.await_args.kwargs
-    assert kwargs["KeyConditionExpression"] == "PK = :pk AND begins_with(SK, :skp)"
-    assert kwargs["ExpressionAttributeValues"][":pk"]["S"] == "EXAM#e1"
-    assert kwargs["ExpressionAttributeValues"][":skp"]["S"] == "STUDENT#"
-
-
-@pytest.mark.asyncio
-async def test_list_exam_students_cursor_pagination() -> None:
-    lek = {
-        "PK": {"S": "EXAM#e1"},
-        "SK": {"S": "STUDENT#s1"},
-    }
-    client = AsyncMock()
-    client.query = AsyncMock(
-        side_effect=[
-            {"Items": [], "LastEvaluatedKey": lek},
-            {"Items": [], "LastEvaluatedKey": None},
-        ]
-    )
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    page1 = await repo.list_exam_students(exam_id="e1", limit=5, cursor=None)
-    assert page1.next_cursor is not None
-    raw = base64.urlsafe_b64decode(
-        page1.next_cursor + "=" * (-len(page1.next_cursor) % 4)
-    )
-    assert json.loads(raw.decode("utf-8")) == {
-        "PK": {"S": "EXAM#e1"},
-        "SK": {"S": "STUDENT#s1"},
-    }
-
-    await repo.list_exam_students(exam_id="e1", limit=5, cursor=page1.next_cursor)
-
-    assert client.query.await_count == 2
-    second_kwargs = client.query.await_args_list[1].kwargs
-    assert second_kwargs["ExclusiveStartKey"] == lek
-
-
-@pytest.mark.asyncio
-async def test_list_exam_students_validation_exception_maps_to_invalid_cursor() -> None:
-    cursor = _encode_lek_local(
-        {
-            "PK": {"S": "EXAM#e1"},
-            "SK": {"S": "STUDENT#s1"},
-        }
-    )
-    client = AsyncMock()
-    client.query = AsyncMock(
-        side_effect=ClientError(
-            {"Error": {"Code": "ValidationException", "Message": "bad key"}},
-            "Query",
-        )
-    )
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    with pytest.raises(InvalidExamListCursorError):
-        await repo.list_exam_students(exam_id="e1", limit=5, cursor=cursor)
-
-
-@pytest.mark.asyncio
-async def test_list_exam_students_non_validation_client_error_propagates() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        side_effect=ClientError(
-            {"Error": {"Code": "AccessDeniedException", "Message": "denied"}},
-            "Query",
-        )
-    )
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-
-    with pytest.raises(ClientError):
-        await repo.list_exam_students(exam_id="e1", limit=5, cursor=None)
-
-
-@pytest.mark.asyncio
-async def test_add_students_second_chunk_failure_compensates_first_chunk() -> None:
-    dup_err = ClientError(
-        {
-            "Error": {"Code": "TransactionCanceledException", "Message": "x"},
-            "CancellationReasons": [{"Code": "ConditionalCheckFailed"}],
-        },
-        "TransactWriteItems",
-    )
-    tw_calls = 0
-
-    async def _tw(**kwargs: object) -> None:
-        nonlocal tw_calls
-        tw_calls += 1
-        if tw_calls == 2:
-            raise dup_err
-
-    client = AsyncMock()
-    client.transact_write_items = AsyncMock(side_effect=_tw)
-    repo = DynamoDbStudentEnrollmentRepository(
-        table_name="grading-table",
-        dynamodb_client=client,
-    )
-    students = [
-        EnrolledStudent(
-            student_id=f"s{i}",
-            exam_id="e1",
-            nom="N",
-            prenom="P",
-            classe="C",
-            submission_status=SubmissionStatus.PENDING,
-        )
-        for i in range(26)
-    ]
-
-    with pytest.raises(DuplicateStudentError):
-        await repo.add_students(exam_id="e1", students=students)
-
-    assert tw_calls == 3
-    third_call = client.transact_write_items.await_args_list[2]
-    deletes = third_call.kwargs["TransactItems"]
-    assert len(deletes) == 25
-    assert all("Delete" in entry for entry in deletes)

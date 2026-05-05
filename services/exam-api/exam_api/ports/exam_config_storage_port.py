@@ -14,9 +14,7 @@ class ExamConfigStoragePort(Protocol):
         """S3 object key for a config file (``exams/{exam_id}/config/{filename}``)."""
         ...
 
-    async def generate_upload_urls(
-        self, *, exam_id: str
-    ) -> dict[str, dict[str, Any]]:
+    async def generate_upload_urls(self, *, exam_id: str) -> dict[str, dict[str, Any]]:
         """Return a presigned POST bundle per file: ``{url, fields}`` (see S3 API).
 
         POST policy enforces a max object size; TTL 15 minutes; key prefix

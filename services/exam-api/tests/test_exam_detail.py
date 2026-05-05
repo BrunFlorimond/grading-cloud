@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import base64
-import json
 from unittest.mock import AsyncMock, Mock, create_autospec
 
 import pytest
-from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from exam_api.api.exam_router import router as exam_router
 from exam_api.api.http_error_handlers import register_http_error_handlers
 from exam_api.api.student_router import router as student_router
+from exam_api.composition import (
+    get_enrollment_repository,
+    get_exam_creation_repository,
+    get_exam_detail_repository,
+    get_exam_ownership_repository,
+)
 from exam_api.application.get_exam_detail import (
     GetExamDetailCommand,
     GetExamDetailUseCase,
@@ -28,9 +31,6 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
     InvalidExamListCursorError,
 )
-from exam_api.infrastructure.dynamodb_exam_detail_repository import (
-    DynamoDbExamDetailRepository,
-)
 from exam_api.ports.exam_creation_repository_port import ExamPage
 from exam_api.ports.exam_detail_repository_port import (
     ExamDetail,
@@ -41,11 +41,6 @@ from exam_api.ports.exam_detail_repository_port import (
 )
 from exam_api.ports.exam_ownership_port import ExamOwnershipPort
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
-
-
-def _encode_lek_local(key: dict[str, object]) -> str:
-    raw = json.dumps(key, sort_keys=True).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 # --- GetExamDetailUseCase ---
@@ -147,263 +142,6 @@ async def test_list_exam_student_statuses_propagates_invalid_cursor_error() -> N
         )
 
 
-# --- DynamoDbExamDetailRepository.get_exam_detail ---
-
-
-@pytest.mark.asyncio
-async def test_get_exam_detail_queries_correct_pk() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        return_value={
-            "Items": [
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "METADATA"},
-                    "teacher_id": {"S": "t1"},
-                    "title": {"S": "T"},
-                    "status": {"S": "created"},
-                }
-            ],
-            "LastEvaluatedKey": None,
-        }
-    )
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    detail = await repo.get_exam_detail(exam_id="e1")
-
-    assert detail.exam_id == "e1"
-    assert detail.teacher_id == "t1"
-    assert detail.title == "T"
-    assert detail.status == "created"
-    kwargs = client.query.await_args.kwargs
-    assert kwargs["KeyConditionExpression"] == "PK = :pk"
-    assert kwargs["ExpressionAttributeValues"][":pk"]["S"] == "EXAM#e1"
-
-
-@pytest.mark.asyncio
-async def test_get_exam_detail_computes_status_counts_from_student_items() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        return_value={
-            "Items": [
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "METADATA"},
-                    "teacher_id": {"S": "t1"},
-                    "title": {"S": "T"},
-                    "status": {"S": "created"},
-                },
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "STUDENT#a"},
-                    "nom": {"S": "A"},
-                    "prenom": {"S": "B"},
-                    "classe": {"S": "C"},
-                    "submission_status": {"S": "PENDING"},
-                },
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "STUDENT#b"},
-                    "nom": {"S": "A"},
-                    "prenom": {"S": "B"},
-                    "classe": {"S": "C"},
-                    "submission_status": {"S": "PENDING"},
-                },
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "STUDENT#c"},
-                    "nom": {"S": "A"},
-                    "prenom": {"S": "B"},
-                    "classe": {"S": "C"},
-                    "submission_status": {"S": "CONVERTED"},
-                },
-            ],
-            "LastEvaluatedKey": None,
-        }
-    )
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    detail = await repo.get_exam_detail(exam_id="e1")
-
-    assert detail.status_counts.pending == 2
-
-
-@pytest.mark.asyncio
-async def test_get_exam_detail_raises_exam_not_found_when_metadata_missing() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        return_value={
-            "Items": [
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "STUDENT#a"},
-                    "nom": {"S": "A"},
-                    "prenom": {"S": "B"},
-                    "classe": {"S": "C"},
-                    "submission_status": {"S": "PENDING"},
-                },
-            ],
-            "LastEvaluatedKey": None,
-        }
-    )
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    with pytest.raises(ExamNotFoundError):
-        await repo.get_exam_detail(exam_id="e1")
-
-
-@pytest.mark.asyncio
-async def test_get_exam_detail_includes_pipeline_timestamps_when_present() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        return_value={
-            "Items": [
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "METADATA"},
-                    "teacher_id": {"S": "t1"},
-                    "title": {"S": "T"},
-                    "status": {"S": "created"},
-                    "pipeline_started_at": {"S": "2026-05-01T12:00:00Z"},
-                    "pipeline_completed_at": {"S": "2026-05-01T13:00:00Z"},
-                }
-            ],
-            "LastEvaluatedKey": None,
-        }
-    )
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    detail = await repo.get_exam_detail(exam_id="e1")
-
-    assert detail.pipeline_started_at == "2026-05-01T12:00:00Z"
-    assert detail.pipeline_completed_at == "2026-05-01T13:00:00Z"
-
-
-@pytest.mark.asyncio
-async def test_get_exam_detail_maps_resource_not_found_to_exam_not_found() -> None:
-    err = ClientError(
-        {"Error": {"Code": "ResourceNotFoundException", "Message": "no table"}},
-        "Query",
-    )
-    client = AsyncMock()
-    client.query = AsyncMock(side_effect=err)
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    with pytest.raises(ExamNotFoundError):
-        await repo.get_exam_detail(exam_id="e1")
-
-
-# --- DynamoDbExamDetailRepository.list_exam_student_statuses ---
-
-
-@pytest.mark.asyncio
-async def test_list_exam_student_statuses_queries_correct_pk_and_sk_prefix() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(return_value={"Items": [], "LastEvaluatedKey": None})
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    await repo.list_exam_student_statuses(exam_id="e1", limit=10, cursor=None)
-
-    kwargs = client.query.await_args.kwargs
-    assert kwargs["KeyConditionExpression"] == "PK = :pk AND begins_with(SK, :skp)"
-    assert kwargs["ExpressionAttributeValues"][":pk"]["S"] == "EXAM#e1"
-    assert kwargs["ExpressionAttributeValues"][":skp"]["S"] == "STUDENT#"
-
-
-@pytest.mark.asyncio
-async def test_list_exam_student_statuses_decodes_cursor_correctly() -> None:
-    lek = {
-        "PK": {"S": "EXAM#e1"},
-        "SK": {"S": "STUDENT#s1"},
-    }
-    cursor = _encode_lek_local(lek)
-    client = AsyncMock()
-    client.query = AsyncMock(return_value={"Items": [], "LastEvaluatedKey": None})
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    await repo.list_exam_student_statuses(exam_id="e1", limit=5, cursor=cursor)
-
-    kwargs = client.query.await_args.kwargs
-    assert kwargs["ExclusiveStartKey"] == lek
-
-
-@pytest.mark.asyncio
-async def test_list_exam_student_statuses_raises_on_invalid_cursor() -> None:
-    client = AsyncMock()
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    with pytest.raises(InvalidExamListCursorError):
-        await repo.list_exam_student_statuses(
-            exam_id="e1",
-            limit=5,
-            cursor="@@@@",
-        )
-
-    client.query.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_list_exam_student_statuses_encodes_next_cursor() -> None:
-    lek = {
-        "PK": {"S": "EXAM#e1"},
-        "SK": {"S": "STUDENT#s1"},
-    }
-    client = AsyncMock()
-    client.query = AsyncMock(return_value={"Items": [], "LastEvaluatedKey": lek})
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    page = await repo.list_exam_student_statuses(exam_id="e1", limit=5, cursor=None)
-
-    assert page.next_cursor == _encode_lek_local(lek)
-
-
-@pytest.mark.asyncio
-async def test_list_exam_student_statuses_pdf_available_flag() -> None:
-    client = AsyncMock()
-    client.query = AsyncMock(
-        return_value={
-            "Items": [
-                {
-                    "PK": {"S": "EXAM#e1"},
-                    "SK": {"S": "STUDENT#s1"},
-                    "nom": {"S": "D"},
-                    "prenom": {"S": "J"},
-                    "classe": {"S": "A"},
-                    "submission_status": {"S": "PENDING"},
-                    "pdf_available": {"BOOL": True},
-                }
-            ],
-            "LastEvaluatedKey": None,
-        }
-    )
-    repo = DynamoDbExamDetailRepository(
-        table_name="grading-table", dynamodb_client=client
-    )
-
-    page = await repo.list_exam_student_statuses(exam_id="e1", limit=5, cursor=None)
-
-    assert len(page.items) == 1
-    assert page.items[0].pdf_available is True
-
-
 # --- exam_router GET /exams/{exam_id} ---
 
 
@@ -418,6 +156,7 @@ def exam_detail_api_client() -> TestClient:
     creation.list_teacher_exams = AsyncMock(
         return_value=ExamPage(items=[], next_cursor=None),
     )
+    app.dependency_overrides[get_exam_creation_repository] = lambda: creation
     app.state.exam_creation_repository = creation
 
     detail_repo = Mock(spec=ExamDetailRepositoryPort)
@@ -440,10 +179,12 @@ def exam_detail_api_client() -> TestClient:
             ),
         ),
     )
+    app.dependency_overrides[get_exam_detail_repository] = lambda: detail_repo
     app.state.exam_detail_repository = detail_repo
 
     ownership = Mock(spec=ExamOwnershipPort)
     ownership.verify_teacher_owns_exam = AsyncMock()
+    app.dependency_overrides[get_exam_ownership_repository] = lambda: ownership
     app.state.exam_ownership_repository = ownership
 
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
@@ -502,9 +243,6 @@ def test_get_exam_detail_endpoint_requires_teacher_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(exam_router)
-    app.state.exam_creation_repository = Mock()
-    app.state.exam_detail_repository = Mock(spec=ExamDetailRepositoryPort)
-    app.state.exam_ownership_repository = Mock(spec=ExamOwnershipPort)
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 
@@ -541,16 +279,19 @@ def student_statuses_api_client() -> TestClient:
 
     enrollment = Mock()
     enrollment.add_students = AsyncMock(side_effect=lambda **kwargs: kwargs["students"])
+    app.dependency_overrides[get_enrollment_repository] = lambda: enrollment
     app.state.student_enrollment_repository = enrollment
 
     detail_repo = Mock(spec=ExamDetailRepositoryPort)
     detail_repo.list_exam_student_statuses = AsyncMock(
         return_value=StudentPipelinePage(items=[], next_cursor=None),
     )
+    app.dependency_overrides[get_exam_detail_repository] = lambda: detail_repo
     app.state.exam_detail_repository = detail_repo
 
     ownership = Mock(spec=ExamOwnershipPort)
     ownership.verify_teacher_owns_exam = AsyncMock()
+    app.dependency_overrides[get_exam_ownership_repository] = lambda: ownership
     app.state.exam_ownership_repository = ownership
 
     jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
@@ -605,9 +346,6 @@ def test_list_student_statuses_endpoint_requires_teacher_auth() -> None:
     app = FastAPI()
     register_http_error_handlers(app)
     app.include_router(student_router)
-    app.state.student_enrollment_repository = Mock()
-    app.state.exam_detail_repository = Mock(spec=ExamDetailRepositoryPort)
-    app.state.exam_ownership_repository = Mock(spec=ExamOwnershipPort)
     app.state.jwt_verifier = create_autospec(JwtVerifierPort, instance=True)
     client = TestClient(app)
 

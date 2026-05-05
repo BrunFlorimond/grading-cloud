@@ -12,6 +12,11 @@ from exam_api.api.dependencies import (
     CurrentTeacher,
     require_own_data,
     require_teacher,
+)
+from exam_api.composition import (
+    get_invite_exam_repository,
+    get_invite_scope_repository,
+    get_student_scope_repository,
     verify_teacher_exam_ownership,
 )
 from exam_api.application.invite_student import (
@@ -62,32 +67,13 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
     return service
 
 
-def get_invite_repository(request: Request) -> ExamRepositoryPort:
-    repository = getattr(request.app.state, "invite_repository", None)
-    if not isinstance(repository, ExamRepositoryPort):
-        raise RuntimeError(
-            "Missing invite repository configuration. Set app.state.invite_repository."
-        )
-    return repository
-
-
-def get_student_scope_repository(
-    repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
-) -> StudentScopeRepositoryPort:
-    if not isinstance(repository, StudentScopeRepositoryPort):
-        raise RuntimeError(
-            "Invite repository must implement student scope persistence methods."
-        )
-    return repository
-
-
 def provide_invite_use_case(
     invite_service: Annotated[
         StudentInviteServicePort, Depends(get_student_invite_service)
     ],
-    exam_repository: Annotated[ExamRepositoryPort, Depends(get_invite_repository)],
+    exam_repository: Annotated[ExamRepositoryPort, Depends(get_invite_exam_repository)],
     student_scope_repository: Annotated[
-        StudentScopeRepositoryPort, Depends(get_student_scope_repository)
+        StudentScopeRepositoryPort, Depends(get_invite_scope_repository)
     ],
 ) -> InviteStudentUseCase:
     return InviteStudentUseCase(
@@ -137,7 +123,7 @@ async def invite_student(
         ) from err
     return InviteStudentResponse(
         student_id=result.student.student_id,
-        exam_id=result.student.exam_id,
+        exam_id=exam_id,
         re_invited=result.re_invited,
     )
 
@@ -166,6 +152,6 @@ async def get_student_scope(
         )
     return StudentScopeResponse(
         student_id=student_scope.student_id,
-        exam_id=student_scope.exam_id,
+        exam_id=exam_id,
         email=student_scope.email,
     )

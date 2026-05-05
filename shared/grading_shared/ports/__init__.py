@@ -66,4 +66,3 @@ class SchedulerPort(Protocol):
 
     def remove_schedule(self, *, schedule_id: str) -> None:
         """Delete a previously created schedule."""
-

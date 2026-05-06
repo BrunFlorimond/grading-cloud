@@ -66,7 +66,13 @@ async def session_with_rls(rls: RLSContext) -> AsyncGenerator[AsyncSession, None
     async with _get_session_factory()() as session:
         async with session.begin():
             await session.execute(
-                text("SET LOCAL app.user_id = :uid; SET LOCAL app.user_type = :utype"),
+                text(
+                    """
+                    SELECT
+                        set_config('app.user_id', :uid, true),
+                        set_config('app.user_type', :utype, true)
+                    """
+                ),
                 {"uid": rls.user_id, "utype": rls.user_type},
             )
             yield session

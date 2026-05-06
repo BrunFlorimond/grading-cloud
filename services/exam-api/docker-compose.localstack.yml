@@ -38,6 +38,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.localstack
+    environment:
+      DATABASE_URL: postgresql+asyncpg://grading_app:grading_pass@exam-api-postgres:5432/grading
     depends_on:
       exam-api-postgres:
         condition: service_healthy
@@ -53,6 +55,8 @@ services:
     container_name: exam-api-migrations
     env_file:
       - .env.localstack
+    environment:
+      DATABASE_URL: postgresql+asyncpg://grading_app:grading_pass@exam-api-postgres:5432/grading
     depends_on:
       exam-api-postgres:
         condition: service_healthy

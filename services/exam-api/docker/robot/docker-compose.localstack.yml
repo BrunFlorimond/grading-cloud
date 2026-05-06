@@ -1,0 +1,69 @@
+services:
+  exam-api-postgres:
+    image: postgres:16
+    container_name: exam-api-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: grading
+      POSTGRES_USER: grading_app
+      POSTGRES_PASSWORD: grading_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - exam_api_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grading_app -d grading"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: exam-api-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: s3,ses,secretsmanager
+      AWS_DEFAULT_REGION: eu-west-1
+      DEBUG: "0"
+    ports:
+      - "4566:4566"
+    volumes:
+      - "../../localstack/init:/etc/localstack/init/ready.d"
+
+  exam-api:
+    build:
+      context: ../../../..
+      dockerfile: services/exam-api/Dockerfile
+    container_name: exam-api
+    restart: unless-stopped
+    env_file:
+      - .env.robot.localstack
+    volumes:
+      - "${HOME}/.aws:/root/.aws:ro"
+    depends_on:
+      exam-api-postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  exam-api-migrations:
+    build:
+      context: ../../../..
+      dockerfile: services/exam-api/Dockerfile
+    container_name: exam-api-migrations
+    env_file:
+      - .env.robot.localstack
+    volumes:
+      - "${HOME}/.aws:/root/.aws:ro"
+    depends_on:
+      exam-api-postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    command: ["alembic", "upgrade", "head"]
+    profiles: ["migrations"]
+
+volumes:
+  exam_api_postgres_data:

@@ -19,8 +19,8 @@ ${INVITED_STUDENT_EMAIL}    %{INVITED_STUDENT_EMAIL=}
 
 # Optional Cognito endpoint override (set for LocalStack, leave empty for real AWS).
 ${COGNITO_ENDPOINT_URL}    %{COGNITO_ENDPOINT_URL=}
-${AWS_ACCESS_KEY_ID}       %{AWS_ACCESS_KEY_ID=test}
-${AWS_SECRET_ACCESS_KEY}   %{AWS_SECRET_ACCESS_KEY=test}
+${AWS_ACCESS_KEY_ID}       %{AWS_ACCESS_KEY_ID=}
+${AWS_SECRET_ACCESS_KEY}   %{AWS_SECRET_ACCESS_KEY=}
 ${AWS_SESSION_TOKEN}       %{AWS_SESSION_TOKEN=}
 ${AWS_REGION}              %{AWS_REGION=eu-west-1}
 ${CREATE_COGNITO_USER_POOL}             %{CREATE_COGNITO_USER_POOL=false}
@@ -238,7 +238,7 @@ Delete Cognito User Pool Best Effort
 Run Cognito Aws Cli
     [Arguments]    ${aws_cli_args}
     ${command}=    Catenate    SEPARATOR=
-    ...    export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} AWS_REGION=${AWS_REGION} AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} COGNITO_ENDPOINT_URL=${COGNITO_ENDPOINT_URL}; 
+    ...    export AWS_REGION=${AWS_REGION} COGNITO_ENDPOINT_URL=${COGNITO_ENDPOINT_URL}; if [ -n "${AWS_ACCESS_KEY_ID}" ]; then export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}; fi; if [ -n "${AWS_SECRET_ACCESS_KEY}" ]; then export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}; fi; if [ -n "${AWS_SESSION_TOKEN}" ]; then export AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}; fi;
     ...    if [ -n "${COGNITO_ENDPOINT_URL}" ]; then aws --endpoint-url "${COGNITO_ENDPOINT_URL}" ${aws_cli_args}; else aws ${aws_cli_args}; fi
     ${result}=    Run Process    bash    -lc    ${command}
     RETURN    ${result}

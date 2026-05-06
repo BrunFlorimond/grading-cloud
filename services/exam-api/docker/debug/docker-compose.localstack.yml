@@ -28,16 +28,18 @@ services:
     ports:
       - "4566:4566"
     volumes:
-      - "./localstack/init:/etc/localstack/init/ready.d"
+      - "../../localstack/init:/etc/localstack/init/ready.d"
 
   exam-api:
     build:
-      context: ../..
+      context: ../../../..
       dockerfile: services/exam-api/Dockerfile
     container_name: exam-api
     restart: unless-stopped
     env_file:
-      - .env.localstack
+      - .env.debug.localstack
+    volumes:
+      - "${HOME}/.aws:/root/.aws:ro"
     depends_on:
       exam-api-postgres:
         condition: service_healthy
@@ -48,11 +50,13 @@ services:
 
   exam-api-migrations:
     build:
-      context: ../..
+      context: ../../../..
       dockerfile: services/exam-api/Dockerfile
     container_name: exam-api-migrations
     env_file:
-      - .env.localstack
+      - .env.debug.localstack
+    volumes:
+      - "${HOME}/.aws:/root/.aws:ro"
     depends_on:
       exam-api-postgres:
         condition: service_healthy

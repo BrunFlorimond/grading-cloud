@@ -68,8 +68,15 @@ jobs:
         working-directory: services/exam-api
         run: |
           set -euo pipefail
-          chmod +x localstack-up.sh
-          ./localstack-up.sh
+          docker compose -f docker/robot/docker-compose.localstack.yml up -d exam-api-postgres localstack
+          for _ in $(seq 1 30); do
+            if docker cp exam-api-localstack:/var/lib/localstack/localstack-exam-api.env docker/robot/.env.robot.localstack 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          test -f docker/robot/.env.robot.localstack
+          docker compose -f docker/robot/docker-compose.localstack.yml --profile migrations run --rm exam-api-migrations
 
       - name: Create Cognito test resources in AWS
         run: |
@@ -120,10 +127,13 @@ jobs:
           from pathlib import Path
           import os
 
-          env_path = Path(".env.localstack")
+          env_path = Path("docker/robot/.env.robot.localstack")
           content = env_path.read_text(encoding="utf-8")
           replacements = {
               "AWS_REGION": os.environ["AWS_REGION"],
+              "AWS_S3_ENDPOINT_URL": "http://localstack:4566",
+              "AWS_SES_ENDPOINT_URL": "http://localstack:4566",
+              "AWS_SECRETSMANAGER_ENDPOINT_URL": "http://localstack:4566",
               "COGNITO_USER_POOL_ID": os.environ["COGNITO_USER_POOL_ID"],
               "COGNITO_APP_CLIENT_ID": os.environ["COGNITO_APP_CLIENT_ID"],
               "COGNITO_ISSUER_URL": os.environ["COGNITO_ISSUER_URL"],
@@ -152,7 +162,7 @@ jobs:
         working-directory: services/exam-api
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.localstack.yml up -d --build exam-api
+          docker compose -f docker/robot/docker-compose.localstack.yml up -d --build exam-api
 
       - name: Wait for API availability
         run: |
@@ -163,7 +173,7 @@ jobs:
             fi
             sleep 2
           done
-          docker compose -f services/exam-api/docker-compose.localstack.yml logs exam-api
+          docker compose -f services/exam-api/docker/robot/docker-compose.localstack.yml logs exam-api
           exit 1
 
       - name: Run Robot API checks
@@ -180,6 +190,16 @@ jobs:
           name: exam-api-robot-reports
           path: services/exam-api/tests/robot/results
 
+      - name: Collect docker logs
+        if: always()
+        working-directory: services/exam-api
+        run: |
+          set +e
+          mkdir -p tests/robot/results/docker-logs
+          docker compose -f docker/robot/docker-compose.localstack.yml logs exam-api > tests/robot/results/docker-logs/exam-api.log 2>&1
+          docker compose -f docker/robot/docker-compose.localstack.yml logs localstack > tests/robot/results/docker-logs/localstack.log 2>&1
+          docker compose -f docker/robot/docker-compose.localstack.yml logs exam-api-postgres > tests/robot/results/docker-logs/postgres.log 2>&1
+
       - name: Teardown docker stack
         if: always()
         working-directory: services/exam-api
@@ -189,4 +209,4 @@ jobs:
             aws cognito-idp delete-user-pool \
               --user-pool-id "${CREATED_COGNITO_USER_POOL_ID}"
           fi
-          docker compose -f docker-compose.localstack.yml down -v --remove-orphans
+          docker compose -f docker/robot/docker-compose.localstack.yml down -v --remove-orphans

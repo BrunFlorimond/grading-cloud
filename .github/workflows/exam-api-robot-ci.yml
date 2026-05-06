@@ -68,8 +68,15 @@ jobs:
         working-directory: services/exam-api
         run: |
           set -euo pipefail
-          chmod +x localstack-up.sh
-          ./localstack-up.sh
+          docker compose -f docker/robot/docker-compose.localstack.yml up -d exam-api-postgres localstack
+          for _ in $(seq 1 30); do
+            if docker cp exam-api-localstack:/var/lib/localstack/localstack-exam-api.env docker/robot/.env.robot.localstack 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          test -f docker/robot/.env.robot.localstack
+          docker compose -f docker/robot/docker-compose.localstack.yml --profile migrations run --rm exam-api-migrations
 
       - name: Create Cognito test resources in AWS
         run: |
@@ -120,7 +127,7 @@ jobs:
           from pathlib import Path
           import os
 
-          env_path = Path(".env.localstack")
+          env_path = Path("docker/robot/.env.robot.localstack")
           content = env_path.read_text(encoding="utf-8")
           replacements = {
               "AWS_REGION": os.environ["AWS_REGION"],
@@ -152,7 +159,7 @@ jobs:
         working-directory: services/exam-api
         run: |
           set -euo pipefail
-          docker compose -f docker-compose.localstack.yml up -d --build exam-api
+          docker compose -f docker/robot/docker-compose.localstack.yml up -d --build exam-api
 
       - name: Wait for API availability
         run: |
@@ -163,7 +170,7 @@ jobs:
             fi
             sleep 2
           done
-          docker compose -f services/exam-api/docker-compose.localstack.yml logs exam-api
+          docker compose -f services/exam-api/docker/robot/docker-compose.localstack.yml logs exam-api
           exit 1
 
       - name: Run Robot API checks
@@ -189,4 +196,4 @@ jobs:
             aws cognito-idp delete-user-pool \
               --user-pool-id "${CREATED_COGNITO_USER_POOL_ID}"
           fi
-          docker compose -f docker-compose.localstack.yml down -v --remove-orphans
+          docker compose -f docker/robot/docker-compose.localstack.yml down -v --remove-orphans

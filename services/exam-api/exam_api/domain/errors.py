@@ -48,6 +48,10 @@ class StudentExamScopeConflictError(InviteError):
     """Raised when an existing student account is bound to another exam scope."""
 
 
+class InvalidUserIdentitySubjectError(InviteError):
+    """Raised when a Cognito subject cannot be converted to a local UUID key."""
+
+
 class ExamValidationError(Exception):
     """Base class for exam creation validation errors."""
 

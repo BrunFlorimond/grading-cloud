@@ -34,6 +34,7 @@ from exam_api.domain.errors import (
 )
 from exam_api.domain.student import Student
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 from exam_api.infrastructure.student_invite_adapter import (
     CognitoSesStudentInviteAdapter,
 )
@@ -105,7 +106,10 @@ def _build_use_case(
         scope_repository.upsert_student_scope = AsyncMock()
     identity_repository = user_identity_repository
     if identity_repository is None:
-        identity_repository = Mock()
+        identity_repository = create_autospec(
+            UserIdentityRepositoryPort,
+            instance=True,
+        )
         identity_repository.upsert_student = AsyncMock()
     return InviteStudentUseCase(
         invite_service=invite_adapter,
@@ -135,7 +139,10 @@ async def test_use_case_returns_new_invite_result() -> None:
     )
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
-    user_identity_repository = Mock()
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
     user_identity_repository.upsert_student = AsyncMock()
     use_case = _build_use_case(
         invite_service=invite_service,
@@ -180,7 +187,10 @@ async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     exam_repository = Mock()
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
-    user_identity_repository = Mock()
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
     user_identity_repository.upsert_student = AsyncMock()
     exam_repository.get_exam = AsyncMock(
         return_value=Exam(
@@ -236,7 +246,10 @@ async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
             "Student account is already scoped to another exam."
         )
     )
-    user_identity_repository = Mock()
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
     user_identity_repository.upsert_student = AsyncMock()
     use_case = _build_use_case(
         invite_service=invite_service,

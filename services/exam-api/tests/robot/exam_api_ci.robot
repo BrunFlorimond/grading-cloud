@@ -13,7 +13,9 @@ ${BASE_URL}           %{BASE_URL=http://localhost:8000}
 ${ADMIN_EMAIL}        %{ADMIN_EMAIL=}
 ${ADMIN_PASSWORD}     %{ADMIN_PASSWORD=}
 ${TEACHER_PASSWORD}   Tc!2026RobotStrongPass9
+${STUDENT_PASSWORD}   St!2026RobotStrongPass9
 ${REGISTER_EMAIL}     %{REGISTER_EMAIL=}
+${INVITED_STUDENT_EMAIL}    %{INVITED_STUDENT_EMAIL=}
 
 # Optional Cognito endpoint override (set for LocalStack, leave empty for real AWS).
 ${COGNITO_ENDPOINT_URL}    %{COGNITO_ENDPOINT_URL=}
@@ -22,7 +24,7 @@ ${AWS_SECRET_ACCESS_KEY}   %{AWS_SECRET_ACCESS_KEY=test}
 ${AWS_SESSION_TOKEN}       %{AWS_SESSION_TOKEN=}
 ${AWS_REGION}              %{AWS_REGION=eu-west-1}
 ${CREATE_COGNITO_USER_POOL}             %{CREATE_COGNITO_USER_POOL=false}
-${DELETE_COGNITO_USER_POOL_ON_TEARDOWN} %{DELETE_COGNITO_USER_POOL_ON_TEARDOWN=false}
+${DELETE_COGNITO_USER_POOL_ON_TEARDOWN}    %{DELETE_COGNITO_USER_POOL_ON_TEARDOWN=false}
 ${COGNITO_USER_POOL_ID}    %{COGNITO_USER_POOL_ID=}
 ${COGNITO_APP_CLIENT_ID}   %{COGNITO_APP_CLIENT_ID=}
 ${CREATED_COGNITO_USER_POOL_ID}    %{CREATED_COGNITO_USER_POOL_ID=}
@@ -96,6 +98,37 @@ Teacher Can Add And List Students
     ${items}=    Set Variable    ${students_body["items"]}
     Length Should Be    ${items}    2
 
+Teacher Can Invite Student And Student Scope Is Accessible
+    [Documentation]    Covers invite endpoint + persistence via student login/scope endpoint.
+    ${student_email}=    Build Unique Student Email
+    ${invite_payload}=    Create Dictionary    student_email=${student_email}
+    ${invite_response}=    POST On Session    exam_api    /exams/${EXAM_ID}/students/student-robot/invite    json=${invite_payload}    headers=${TEACHER_HEADERS}    expected_status=any
+    Should Be Equal As Integers    ${invite_response.status_code}    200
+    ${invite_body}=    Evaluate    $invite_response.json()
+    Should Not Be Empty    ${invite_body["student_id"]}
+    ${student_id}=    Set Variable    ${invite_body["student_id"]}
+    Set Suite Variable    ${INVITED_STUDENT_EMAIL}    ${student_email}
+    Set Suite Variable    ${INVITED_STUDENT_ID}    ${student_id}
+
+    ${pool_id}=    Get Cognito User Pool Id
+    Should Not Be Empty    ${pool_id}
+    ${set_password_result}=    Run Cognito Aws Cli
+    ...    cognito-idp admin-set-user-password --user-pool-id ${pool_id} --username "${student_email}" --password "${STUDENT_PASSWORD}" --permanent
+    Should Be Equal As Integers    ${set_password_result.rc}    0
+
+    ${student_login_payload}=    Create Dictionary    email=${student_email}    password=${STUDENT_PASSWORD}
+    ${student_login_response}=    POST On Session    exam_api    /auth/student-login    json=${student_login_payload}    expected_status=any
+    Should Be Equal As Integers    ${student_login_response.status_code}    200
+    ${student_login_body}=    Evaluate    $student_login_response.json()
+    Should Not Be Empty    ${student_login_body["id_token"]}
+
+    ${student_headers}=    Create Dictionary    Authorization=Bearer ${student_login_body["id_token"]}
+    ${scope_response}=    GET On Session    exam_api    /exams/${EXAM_ID}/students/${student_id}/scope    headers=${student_headers}    expected_status=any
+    Should Be Equal As Integers    ${scope_response.status_code}    200
+    ${scope_body}=    Evaluate    $scope_response.json()
+    Should Be Equal    ${scope_body["student_id"]}    ${student_id}
+    Should Be Equal    ${scope_body["exam_id"]}    ${EXAM_ID}
+
 *** Keywords ***
 Prepare Authenticated Context
     Bootstrap Cognito User Pool If Requested
@@ -133,11 +166,17 @@ Build Unique Teacher Email
     ${email}=    Catenate    SEPARATOR=    robot-teacher-    ${epoch}    @passmail.net
     RETURN    ${email}
 
+Build Unique Student Email
+    ${epoch}=    Evaluate    __import__("time").time_ns()
+    ${email}=    Catenate    SEPARATOR=    robot-student-    ${epoch}    @passmail.net
+    RETURN    ${email}
+
 
 Cleanup Created Users Best Effort
     # Best-effort cleanup; do not make test results fail because cleanup failed.
     ${pool_id}=    Get Cognito User Pool Id
     Run Keyword And Ignore Error    Delete Cognito User Best Effort    ${pool_id}    ${REGISTER_EMAIL}
+    Run Keyword And Ignore Error    Delete Cognito User Best Effort    ${pool_id}    ${INVITED_STUDENT_EMAIL}
     Run Keyword And Ignore Error    Delete Cognito User Pool Best Effort    ${pool_id}
 
 Get Cognito User Pool Id

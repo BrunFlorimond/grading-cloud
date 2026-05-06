@@ -34,6 +34,7 @@ from exam_api.domain.errors import (
 )
 from exam_api.domain.student import Student
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 from exam_api.infrastructure.student_invite_adapter import (
     CognitoSesStudentInviteAdapter,
 )
@@ -93,6 +94,7 @@ def _build_use_case(
     invite_service: Mock | None = None,
     exam_repository: Mock | None = None,
     student_scope_repository: Mock | None = None,
+    user_identity_repository: Mock | None = None,
 ) -> InviteStudentUseCase:
     invite_adapter = invite_service
     if invite_adapter is None:
@@ -102,10 +104,18 @@ def _build_use_case(
     if scope_repository is None:
         scope_repository = Mock()
         scope_repository.upsert_student_scope = AsyncMock()
+    identity_repository = user_identity_repository
+    if identity_repository is None:
+        identity_repository = create_autospec(
+            UserIdentityRepositoryPort,
+            instance=True,
+        )
+        identity_repository.upsert_student = AsyncMock()
     return InviteStudentUseCase(
         invite_service=invite_adapter,
         exam_repository=exam_repository or Mock(),
         student_scope_repository=scope_repository,
+        user_identity_repository=identity_repository,
     )
 
 
@@ -129,10 +139,16 @@ async def test_use_case_returns_new_invite_result() -> None:
     )
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_student = AsyncMock()
     use_case = _build_use_case(
         invite_service=invite_service,
         exam_repository=exam_repository,
         student_scope_repository=student_scope_repository,
+        user_identity_repository=user_identity_repository,
     )
 
     result = await use_case.execute(
@@ -156,6 +172,7 @@ async def test_use_case_returns_new_invite_result() -> None:
         exam_id="exam-1",
     )
     student_scope_repository.upsert_student_scope.assert_awaited_once()
+    user_identity_repository.upsert_student.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -170,6 +187,11 @@ async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     exam_repository = Mock()
     student_scope_repository = Mock()
     student_scope_repository.upsert_student_scope = AsyncMock()
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_student = AsyncMock()
     exam_repository.get_exam = AsyncMock(
         return_value=Exam(
             exam_id="exam-1",
@@ -182,6 +204,7 @@ async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
         invite_service=invite_service,
         exam_repository=exam_repository,
         student_scope_repository=student_scope_repository,
+        user_identity_repository=user_identity_repository,
     )
 
     result = await use_case.execute(
@@ -196,6 +219,7 @@ async def test_use_case_returns_reinvited_true_when_student_exists() -> None:
     assert result.re_invited is True
     assert result.student.student_id == "student-sub-existing"
     student_scope_repository.upsert_student_scope.assert_awaited_once()
+    user_identity_repository.upsert_student.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -222,10 +246,16 @@ async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
             "Student account is already scoped to another exam."
         )
     )
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_student = AsyncMock()
     use_case = _build_use_case(
         invite_service=invite_service,
         exam_repository=exam_repository,
         student_scope_repository=student_scope_repository,
+        user_identity_repository=user_identity_repository,
     )
 
     with pytest.raises(StudentExamScopeConflictError):
@@ -239,6 +269,7 @@ async def test_use_case_raises_scope_conflict_from_dynamo_upsert() -> None:
         )
 
     invite_service.invite_student.assert_awaited_once()
+    user_identity_repository.upsert_student.assert_awaited_once()
     student_scope_repository.upsert_student_scope.assert_awaited_once()
 
 

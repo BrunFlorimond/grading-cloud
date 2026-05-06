@@ -38,6 +38,7 @@ from exam_api.domain.teacher import Teacher
 from exam_api.infrastructure.cognito_auth_adapter import CognitoAuthAdapter
 from exam_api.ports.auth_service_port import AuthTokens
 from exam_api.ports.jwt_verifier_port import JwtVerifierPort
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 
 
 def _make_client_error(code: str, message: str) -> ClientError:
@@ -88,7 +89,21 @@ async def test_register_returns_teacher_with_cognito_sub() -> None:
     auth.register_teacher = AsyncMock(
         return_value="a1fdb8a9-4f65-4f3d-9f99-984f2634af11"
     )
-    use_case = RegisterTeacherUseCase(auth_service=auth)
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_teacher = AsyncMock(
+        return_value=Teacher(
+            teacher_id="a1fdb8a9-4f65-4f3d-9f99-984f2634af11",
+            email="teacher@example.com",
+            full_name="Ada Lovelace",
+        )
+    )
+    use_case = RegisterTeacherUseCase(
+        auth_service=auth,
+        user_identity_repository=user_identity_repository,
+    )
 
     result = await use_case.execute(
         RegisterTeacherCommand(
@@ -107,7 +122,15 @@ async def test_register_returns_teacher_with_cognito_sub() -> None:
 async def test_register_raises_duplicate_email_error() -> None:
     auth = Mock()
     auth.register_teacher = AsyncMock(side_effect=DuplicateEmailError("duplicate"))
-    use_case = RegisterTeacherUseCase(auth_service=auth)
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_teacher = AsyncMock()
+    use_case = RegisterTeacherUseCase(
+        auth_service=auth,
+        user_identity_repository=user_identity_repository,
+    )
 
     with pytest.raises(DuplicateEmailError):
         await use_case.execute(
@@ -123,7 +146,15 @@ async def test_register_raises_duplicate_email_error() -> None:
 async def test_register_raises_weak_password_error() -> None:
     auth = Mock()
     auth.register_teacher = AsyncMock(side_effect=WeakPasswordError("weak password"))
-    use_case = RegisterTeacherUseCase(auth_service=auth)
+    user_identity_repository = create_autospec(
+        UserIdentityRepositoryPort,
+        instance=True,
+    )
+    user_identity_repository.upsert_teacher = AsyncMock()
+    use_case = RegisterTeacherUseCase(
+        auth_service=auth,
+        user_identity_repository=user_identity_repository,
+    )
 
     with pytest.raises(WeakPasswordError):
         await use_case.execute(

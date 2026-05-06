@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncGenerator
 from functools import lru_cache
 from typing import Annotated
 
@@ -27,6 +28,11 @@ from exam_api.domain.errors import (
     WeakPasswordError,
 )
 from exam_api.infrastructure.cognito_auth_adapter import CognitoAuthAdapter
+from exam_api.infrastructure.db import raw_session
+from exam_api.infrastructure.postgres_user_identity_repository import (
+    PostgresUserIdentityRepository,
+)
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -72,8 +78,20 @@ class LoginResponse(BaseModel):
     expires_in: int
 
 
-def get_register_use_case() -> RegisterTeacherUseCase:
-    return RegisterTeacherUseCase(auth_service=_build_auth_adapter())
+async def get_user_identity_repository() -> AsyncGenerator[UserIdentityRepositoryPort, None]:
+    async with raw_session() as session:
+        yield PostgresUserIdentityRepository(session)
+
+
+def get_register_use_case(
+    user_identity_repository: Annotated[
+        UserIdentityRepositoryPort, Depends(get_user_identity_repository)
+    ],
+) -> RegisterTeacherUseCase:
+    return RegisterTeacherUseCase(
+        auth_service=_build_auth_adapter(),
+        user_identity_repository=user_identity_repository,
+    )
 
 
 def get_login_use_case() -> LoginTeacherUseCase:

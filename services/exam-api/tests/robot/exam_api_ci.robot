@@ -24,7 +24,7 @@ ${AWS_SECRET_ACCESS_KEY}   %{AWS_SECRET_ACCESS_KEY=test}
 ${AWS_SESSION_TOKEN}       %{AWS_SESSION_TOKEN=}
 ${AWS_REGION}              %{AWS_REGION=eu-west-1}
 ${CREATE_COGNITO_USER_POOL}             %{CREATE_COGNITO_USER_POOL=false}
-${DELETE_COGNITO_USER_POOL_ON_TEARDOWN} %{DELETE_COGNITO_USER_POOL_ON_TEARDOWN=false}
+${DELETE_COGNITO_USER_POOL_ON_TEARDOWN}    %{DELETE_COGNITO_USER_POOL_ON_TEARDOWN=false}
 ${COGNITO_USER_POOL_ID}    %{COGNITO_USER_POOL_ID=}
 ${COGNITO_APP_CLIENT_ID}   %{COGNITO_APP_CLIENT_ID=}
 ${CREATED_COGNITO_USER_POOL_ID}    %{CREATED_COGNITO_USER_POOL_ID=}
@@ -113,7 +113,7 @@ Teacher Can Invite Student And Student Scope Is Accessible
     ${pool_id}=    Get Cognito User Pool Id
     Should Not Be Empty    ${pool_id}
     ${set_password_result}=    Run Cognito Aws Cli
-    ...    cognito-idp admin-set-user-password --user-pool-id ${pool_id} --username ${student_email} --password ${STUDENT_PASSWORD} --permanent
+    ...    cognito-idp admin-set-user-password --user-pool-id ${pool_id} --username "${student_email}" --password "${STUDENT_PASSWORD}" --permanent
     Should Be Equal As Integers    ${set_password_result.rc}    0
 
     ${student_login_payload}=    Create Dictionary    email=${student_email}    password=${STUDENT_PASSWORD}

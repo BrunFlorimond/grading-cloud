@@ -73,11 +73,11 @@ if [[ -n "${PREVIOUS_ENV_FILE}" ]]; then
 fi
 
 if grep -q "replace-with-real-cognito" "${ENV_FILE}"; then
-  echo "Update Cognito values in ${ENV_FILE} before starting exam-api:"
+  echo "Cognito values in ${ENV_FILE} are placeholders."
+  echo "If you run exam-api with Cognito, set:"
   echo "- COGNITO_USER_POOL_ID"
   echo "- COGNITO_APP_CLIENT_ID"
   echo "- COGNITO_ISSUER_URL"
-  exit 1
 fi
 
 echo "[4/4] Running migrations then starting exam-api..."

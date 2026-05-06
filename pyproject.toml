@@ -3,7 +3,10 @@ name = "grading-cloud"
 version = "0.1.0"
 description = "Cloud-native grading pipeline monorepo."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "robotframework>=7.4.2",
+    "robotframework-requests>=0.9.7",
+]
 
 [tool.uv.workspace]
 members = ["shared", "services/*", "infra"]

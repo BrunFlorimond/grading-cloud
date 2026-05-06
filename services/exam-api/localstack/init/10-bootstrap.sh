@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REGION="${AWS_DEFAULT_REGION:-eu-west-1}"
+REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-west-1}}"
 BUCKET_NAME="grading-cloud-local-exam-config"
 FROM_EMAIL="no-reply@local.grading-cloud"
 

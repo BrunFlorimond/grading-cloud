@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     environment:
       SERVICES: s3,ses,secretsmanager
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: eu-west-1
       DEBUG: "0"
     ports:
       - "4566:4566"

@@ -1,4 +1,4 @@
-# grading-cloud
+# grading-cloud - WIP Only Slice 1 implemented
 
 A cloud-native AI-powered grading pipeline built on AWS, designed to automate the correction, harmonization, and reporting of student work at scale. Demonstrates domain-driven design, hexagonal architecture, event-driven async processing, and infrastructure as code — end to end.
 

@@ -10,9 +10,9 @@ awslocal ses verify-email-identity --email-address "${FROM_EMAIL}" >/dev/null
 
 cat >/tmp/localstack-exam-api.env <<EOF
 AWS_REGION=${REGION}
-AWS_S3_ENDPOINT_URL=http://localhost:4566
-AWS_SES_ENDPOINT_URL=http://localhost:4566
-AWS_SECRETSMANAGER_ENDPOINT_URL=http://localhost:4566
+AWS_S3_ENDPOINT_URL=http://localstack:4566
+AWS_SES_ENDPOINT_URL=http://localstack:4566
+AWS_SECRETSMANAGER_ENDPOINT_URL=http://localstack:4566
 DATABASE_URL=postgresql+asyncpg://grading_app:grading_pass@exam-api-postgres:5432/grading
 COGNITO_USER_POOL_ID=replace-with-real-cognito-user-pool-id
 COGNITO_APP_CLIENT_ID=replace-with-real-cognito-app-client-id

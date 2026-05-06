@@ -12,6 +12,7 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
 )
 from exam_api.domain.student import Student
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 
@@ -34,10 +35,12 @@ class InviteStudentUseCase:
         invite_service: StudentInviteServicePort,
         exam_repository: ExamRepositoryPort,
         student_scope_repository: StudentScopeRepositoryPort,
+        user_identity_repository: UserIdentityRepositoryPort,
     ) -> None:
         self._invite_service = invite_service
         self._exam_repository = exam_repository
         self._student_scope_repository = student_scope_repository
+        self._user_identity_repository = user_identity_repository
 
     async def execute(self, command: InviteStudentCommand) -> InviteStudentResult:
         exam = await self._load_owned_exam(
@@ -51,6 +54,10 @@ class InviteStudentUseCase:
         student = Student(
             student_id=invite_result.cognito_sub,
             email=command.student_email,
+        )
+        await self._user_identity_repository.upsert_student(
+            cognito_sub=student.student_id,
+            email=str(student.email),
         )
         await self._student_scope_repository.upsert_student_scope(
             student=student,

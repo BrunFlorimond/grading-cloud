@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -29,8 +30,13 @@ from exam_api.domain.errors import (
     ExamOwnershipError,
     StudentExamScopeConflictError,
 )
+from exam_api.infrastructure.db import raw_session
+from exam_api.infrastructure.postgres_user_identity_repository import (
+    PostgresUserIdentityRepository,
+)
 from exam_api.ports.student_invite_port import StudentInviteServicePort
 from exam_api.ports.student_scope_repository_port import StudentScopeRepositoryPort
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 
 router = APIRouter(prefix="/exams", tags=["invite"])
 
@@ -67,6 +73,11 @@ def get_student_invite_service(request: Request) -> StudentInviteServicePort:
     return service
 
 
+async def get_user_identity_repository() -> AsyncGenerator[UserIdentityRepositoryPort, None]:
+    async with raw_session() as session:
+        yield PostgresUserIdentityRepository(session)
+
+
 def provide_invite_use_case(
     invite_service: Annotated[
         StudentInviteServicePort, Depends(get_student_invite_service)
@@ -75,11 +86,15 @@ def provide_invite_use_case(
     student_scope_repository: Annotated[
         StudentScopeRepositoryPort, Depends(get_invite_scope_repository)
     ],
+    user_identity_repository: Annotated[
+        UserIdentityRepositoryPort, Depends(get_user_identity_repository)
+    ],
 ) -> InviteStudentUseCase:
     return InviteStudentUseCase(
         invite_service=invite_service,
         exam_repository=exam_repository,
         student_scope_repository=student_scope_repository,
+        user_identity_repository=user_identity_repository,
     )
 
 

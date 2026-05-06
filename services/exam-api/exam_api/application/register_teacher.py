@@ -8,6 +8,7 @@ from pydantic import EmailStr, Field, SecretStr, field_validator
 from exam_api.domain.errors import DuplicateEmailError, WeakPasswordError
 from exam_api.domain.teacher import Teacher
 from exam_api.ports.auth_service_port import AuthServicePort
+from exam_api.ports.user_identity_repository_port import UserIdentityRepositoryPort
 
 
 class RegisterTeacherCommand(StrictModel):
@@ -28,8 +29,13 @@ class RegisterTeacherResult(StrictModel):
 
 
 class RegisterTeacherUseCase:
-    def __init__(self, auth_service: AuthServicePort) -> None:
+    def __init__(
+        self,
+        auth_service: AuthServicePort,
+        user_identity_repository: UserIdentityRepositoryPort,
+    ) -> None:
         self._auth = auth_service
+        self._user_identity_repository = user_identity_repository
 
     async def execute(self, command: RegisterTeacherCommand) -> RegisterTeacherResult:
         try:
@@ -41,10 +47,9 @@ class RegisterTeacherUseCase:
         except (DuplicateEmailError, WeakPasswordError):
             raise
 
-        return RegisterTeacherResult(
-            teacher=Teacher(
-                teacher_id=teacher_id,
-                email=command.email,
-                full_name=command.full_name,
-            )
+        teacher = await self._user_identity_repository.upsert_teacher(
+            cognito_sub=teacher_id,
+            email=str(command.email),
+            full_name=command.full_name,
         )
+        return RegisterTeacherResult(teacher=teacher)

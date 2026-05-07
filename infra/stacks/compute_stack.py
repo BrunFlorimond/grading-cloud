@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, CfnParameter, Duration, Stack
+from aws_cdk import CfnOutput, CfnParameter, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
@@ -6,12 +6,27 @@ from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_events as events
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_lambda_event_sources as lambda_event_sources
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_scheduler as scheduler
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_sqs as sqs
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
+
+BATCH_POLLERS_SCHEDULE_GROUP_NAME = "grading-batch-pollers"
+
+# Inline placeholder for the batch-poller Lambda. The real implementation ships
+# as a zip via CI; this stub only exists so CDK can synth before the first
+# deploy.
+_BATCH_POLLER_PLACEHOLDER_CODE = (
+    "def handler(event, context):\n"
+    "    raise NotImplementedError("
+    "'batch-poller code is uploaded by CI; replace via aws lambda update-function-code'"
+    ")\n"
+)
 
 
 class ComputeStack(Stack):
@@ -173,6 +188,136 @@ class ComputeStack(Stack):
             parameter_name="/grading/messaging/pdf-generation-queue-url",
             string_value=pdf_generation_queue.queue_url,
         )
+
+        # ── Lambdas ──────────────────────────────────────────────────────────
+        # Explicit log groups (the deprecated `log_retention=` shim spawns a
+        # custom-resource Lambda; pre-creating the group is the modern path).
+        # removal_policy=DESTROY so `cdk destroy` cleans up the groups; without
+        # it, the default RETAIN orphans them and a subsequent `cdk deploy`
+        # fails on "ResourceAlreadyExists".
+        spreadsheet_converter_log_group = logs.LogGroup(
+            self,
+            "SpreadsheetConverterLogGroup",
+            log_group_name="/aws/lambda/grading-spreadsheet-converter",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        pdf_generator_log_group = logs.LogGroup(
+            self,
+            "PdfGeneratorLogGroup",
+            log_group_name="/aws/lambda/grading-pdf-generator",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        batch_poller_log_group = logs.LogGroup(
+            self,
+            "BatchPollerLogGroup",
+            log_group_name="/aws/lambda/grading-batch-poller",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        # Container image Lambda — consumes spreadsheet-conversion queue.
+        spreadsheet_converter_lambda = lambda_.DockerImageFunction(
+            self,
+            "SpreadsheetConverterLambda",
+            function_name="grading-spreadsheet-converter",
+            code=lambda_.DockerImageCode.from_ecr(
+                self.spreadsheet_converter_repository, tag_or_digest="latest"
+            ),
+            memory_size=512,
+            timeout=Duration.seconds(300),
+            environment={
+                "FILES_BUCKET_NAME": files_bucket.bucket_name,
+                "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
+            },
+            log_group=spreadsheet_converter_log_group,
+        )
+        spreadsheet_converter_lambda.add_event_source(
+            lambda_event_sources.SqsEventSource(
+                spreadsheet_conversion_queue, batch_size=1
+            )
+        )
+        files_bucket.grant_read_write(spreadsheet_converter_lambda)
+        pipeline_events_queue.grant_send_messages(spreadsheet_converter_lambda)
+
+        # Container image Lambda — consumes pdf-generation queue.
+        pdf_generator_lambda = lambda_.DockerImageFunction(
+            self,
+            "PdfGeneratorLambda",
+            function_name="grading-pdf-generator",
+            code=lambda_.DockerImageCode.from_ecr(
+                self.pdf_generator_repository, tag_or_digest="latest"
+            ),
+            memory_size=1024,
+            timeout=Duration.seconds(300),
+            environment={
+                "FILES_BUCKET_NAME": files_bucket.bucket_name,
+                "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
+            },
+            log_group=pdf_generator_log_group,
+        )
+        pdf_generator_lambda.add_event_source(
+            lambda_event_sources.SqsEventSource(pdf_generation_queue, batch_size=1)
+        )
+        files_bucket.grant_read_write(pdf_generator_lambda)
+        pipeline_events_queue.grant_send_messages(pdf_generator_lambda)
+
+        # Zip Lambda — invoked by EventBridge Scheduler (one rule per active batch).
+        # Not subscribed to any queue.
+        batch_poller_lambda = lambda_.Function(
+            self,
+            "BatchPollerLambda",
+            function_name="grading-batch-poller",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_inline(_BATCH_POLLER_PLACEHOLDER_CODE),
+            memory_size=256,
+            timeout=Duration.seconds(60),
+            environment={
+                "FILES_BUCKET_NAME": files_bucket.bucket_name,
+                "PIPELINE_EVENTS_QUEUE_URL": pipeline_events_queue.queue_url,
+            },
+            log_group=batch_poller_log_group,
+        )
+        files_bucket.grant_read_write(batch_poller_lambda)
+        pipeline_events_queue.grant_send_messages(batch_poller_lambda)
+
+        # ── EventBridge Scheduler ────────────────────────────────────────────
+        # The schedule group is pre-created here; individual schedules (one per
+        # active Anthropic batch) are created/deleted dynamically by exam-api.
+        batch_pollers_schedule_group = scheduler.CfnScheduleGroup(
+            self,
+            "BatchPollersScheduleGroup",
+            name=BATCH_POLLERS_SCHEDULE_GROUP_NAME,
+        )
+
+        # Role assumed by EventBridge Scheduler when invoking the batch-poller
+        # Lambda. exam-api passes this ARN as the `RoleArn` on each schedule.
+        # SourceAccount + SourceArn scope the trust to schedules created in our
+        # account AND inside the batch-pollers group only — defends against the
+        # confused-deputy pattern where another account/group could trick
+        # Scheduler into assuming this role.
+        batch_pollers_group_arn = (
+            f"arn:aws:scheduler:{self.region}:{self.account}"
+            f":schedule/{BATCH_POLLERS_SCHEDULE_GROUP_NAME}/*"
+        )
+        batch_poller_scheduler_role = iam.Role(
+            self,
+            "BatchPollerSchedulerRole",
+            role_name="grading-batch-poller-scheduler-role",
+            assumed_by=iam.ServicePrincipal(
+                "scheduler.amazonaws.com",
+                conditions={
+                    "StringEquals": {"aws:SourceAccount": self.account},
+                    "ArnLike": {"aws:SourceArn": batch_pollers_group_arn},
+                },
+            ),
+            description=(
+                "Assumed by EventBridge Scheduler to invoke the batch-poller Lambda."
+            ),
+        )
+        batch_poller_lambda.grant_invoke(batch_poller_scheduler_role)
 
         # ── EventBridge ──────────────────────────────────────────────────────
         event_bus = events.EventBus(
@@ -344,6 +489,60 @@ class ComputeStack(Stack):
                 resources=[event_bus.event_bus_arn],
             )
         )
+        # exam-api creates/deletes schedules dynamically (one per active batch),
+        # scoped to the batch-pollers group only.
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SchedulerAccess",
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "scheduler:CreateSchedule",
+                    "scheduler:DeleteSchedule",
+                    "scheduler:GetSchedule",
+                    "scheduler:UpdateSchedule",
+                ],
+                resources=[
+                    f"arn:aws:scheduler:{self.region}:{self.account}"
+                    f":schedule/{BATCH_POLLERS_SCHEDULE_GROUP_NAME}/*"
+                ],
+            )
+        )
+        # PassRole is required so exam-api can hand the scheduler role over to
+        # EventBridge Scheduler when creating each schedule.
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SchedulerPassRole",
+                effect=iam.Effect.ALLOW,
+                actions=["iam:PassRole"],
+                resources=[batch_poller_scheduler_role.role_arn],
+                conditions={
+                    "StringEquals": {
+                        "iam:PassedToService": "scheduler.amazonaws.com"
+                    }
+                },
+            )
+        )
+
+        # exam-api needs the batch-poller Lambda ARN to point new scheduler rules
+        # at it, plus the schedule group name and the role Scheduler assumes.
+        ssm.StringParameter(
+            self,
+            "BatchPollerLambdaArnParam",
+            parameter_name="/grading/lambda/batch-poller-arn",
+            string_value=batch_poller_lambda.function_arn,
+        )
+        ssm.StringParameter(
+            self,
+            "BatchPollersScheduleGroupNameParam",
+            parameter_name="/grading/scheduler/batch-pollers-group-name",
+            string_value=BATCH_POLLERS_SCHEDULE_GROUP_NAME,
+        )
+        ssm.StringParameter(
+            self,
+            "BatchPollerSchedulerRoleArnParam",
+            parameter_name="/grading/scheduler/batch-poller-role-arn",
+            string_value=batch_poller_scheduler_role.role_arn,
+        )
 
         # ── Outputs ───────────────────────────────────────────────────────────
         CfnOutput(
@@ -399,4 +598,22 @@ class ComputeStack(Stack):
             "PublicSubnetIds",
             value=",".join([s.subnet_id for s in vpc.public_subnets]),
             export_name="GradingPublicSubnetIds",
+        )
+        CfnOutput(
+            self,
+            "BatchPollerLambdaArn",
+            value=batch_poller_lambda.function_arn,
+            export_name="GradingBatchPollerLambdaArn",
+        )
+        CfnOutput(
+            self,
+            "BatchPollersScheduleGroupName",
+            value=batch_pollers_schedule_group.name or BATCH_POLLERS_SCHEDULE_GROUP_NAME,
+            export_name="GradingBatchPollersScheduleGroupName",
+        )
+        CfnOutput(
+            self,
+            "BatchPollerSchedulerRoleArn",
+            value=batch_poller_scheduler_role.role_arn,
+            export_name="GradingBatchPollerSchedulerRoleArn",
         )

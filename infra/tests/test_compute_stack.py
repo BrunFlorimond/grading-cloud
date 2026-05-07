@@ -260,3 +260,337 @@ def test_no_iam_action_on_dlqs(compute_template: Template) -> None:
                         f"references DLQ {referenced_logical_id} — DLQs must "
                         "only be reachable via redrive policy."
                     )
+
+
+# ── Lambdas ─────────────────────────────────────────────────────────────────
+
+
+def test_three_lambda_functions_total(compute_template: Template) -> None:
+    # spreadsheet-converter + pdf-generator + batch-poller
+    compute_template.resource_count_is("AWS::Lambda::Function", 3)
+
+
+def test_spreadsheet_converter_lambda_config(compute_template: Template) -> None:
+    compute_template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "FunctionName": "grading-spreadsheet-converter",
+            "PackageType": "Image",
+            "MemorySize": 512,
+            "Timeout": 300,
+        },
+    )
+
+
+def test_pdf_generator_lambda_config(compute_template: Template) -> None:
+    compute_template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "FunctionName": "grading-pdf-generator",
+            "PackageType": "Image",
+            "MemorySize": 1024,
+            "Timeout": 300,
+        },
+    )
+
+
+def test_batch_poller_lambda_config(compute_template: Template) -> None:
+    """batch-poller is a zip-deployed Python Lambda — NOT a container."""
+    compute_template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "FunctionName": "grading-batch-poller",
+            "Runtime": "python3.12",
+            "Handler": "handler.handler",
+            "MemorySize": 256,
+            "Timeout": 60,
+        },
+    )
+
+
+def test_batch_poller_lambda_is_not_a_container(compute_template: Template) -> None:
+    """batch-poller must NOT have PackageType=Image (it's a zip Lambda)."""
+    functions = compute_template.find_resources(
+        "AWS::Lambda::Function",
+        {
+            "Properties": Match.object_like(
+                {"FunctionName": "grading-batch-poller"}
+            )
+        },
+    )
+    assert len(functions) == 1, "Expected exactly one batch-poller Lambda"
+    props = next(iter(functions.values()))["Properties"]
+    assert props.get("PackageType") != "Image"
+
+
+# ── SQS event sources ───────────────────────────────────────────────────────
+
+
+def test_two_lambda_event_source_mappings(compute_template: Template) -> None:
+    """Only the two container Lambdas are SQS-triggered. batch-poller is
+    invoked by EventBridge Scheduler (no event-source mapping)."""
+    compute_template.resource_count_is("AWS::Lambda::EventSourceMapping", 2)
+
+
+@pytest.mark.parametrize(
+    "queue_logical_prefix",
+    ["SpreadsheetConversionQueue", "PdfGenerationQueue"],
+)
+def test_sqs_event_source_batch_size_one(
+    compute_template: Template, queue_logical_prefix: str
+) -> None:
+    compute_template.has_resource_properties(
+        "AWS::Lambda::EventSourceMapping",
+        {
+            "BatchSize": 1,
+            "EventSourceArn": {
+                "Fn::GetAtt": [
+                    Match.string_like_regexp(queue_logical_prefix),
+                    "Arn",
+                ]
+            },
+        },
+    )
+
+
+# ── EventBridge Scheduler ───────────────────────────────────────────────────
+
+
+def test_batch_pollers_schedule_group_exists(compute_template: Template) -> None:
+    compute_template.has_resource_properties(
+        "AWS::Scheduler::ScheduleGroup",
+        {"Name": "grading-batch-pollers"},
+    )
+
+
+def test_no_individual_schedules_provisioned(compute_template: Template) -> None:
+    """Per-batch schedules are created at runtime by exam-api, never via CDK."""
+    compute_template.resource_count_is("AWS::Scheduler::Schedule", 0)
+
+
+def test_scheduler_role_trusts_scheduler_service(compute_template: Template) -> None:
+    """Trust policy must scope to scheduler.amazonaws.com AND constrain both
+    aws:SourceAccount and aws:SourceArn (confused-deputy hardening). Without
+    SourceArn, any schedule in any group could assume this role."""
+    compute_template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "RoleName": "grading-batch-poller-scheduler-role",
+            "AssumeRolePolicyDocument": Match.object_like(
+                {
+                    "Statement": Match.array_with(
+                        [
+                            Match.object_like(
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "sts:AssumeRole",
+                                    "Principal": {
+                                        "Service": "scheduler.amazonaws.com"
+                                    },
+                                    "Condition": Match.object_like(
+                                        {
+                                            "StringEquals": Match.object_like(
+                                                {
+                                                    "aws:SourceAccount": Match.any_value()
+                                                }
+                                            ),
+                                            "ArnLike": Match.object_like(
+                                                {"aws:SourceArn": Match.any_value()}
+                                            ),
+                                        }
+                                    ),
+                                }
+                            )
+                        ]
+                    )
+                }
+            ),
+        },
+    )
+
+
+def test_scheduler_role_source_arn_scoped_to_batch_pollers_group(
+    compute_template: Template,
+) -> None:
+    """The aws:SourceArn condition must end with the batch-pollers group ARN
+    suffix — nothing wider should be acceptable."""
+    roles = compute_template.find_resources(
+        "AWS::IAM::Role",
+        {
+            "Properties": Match.object_like(
+                {"RoleName": "grading-batch-poller-scheduler-role"}
+            )
+        },
+    )
+    assert len(roles) == 1
+    statements = next(iter(roles.values()))["Properties"][
+        "AssumeRolePolicyDocument"
+    ]["Statement"]
+    arn_like = statements[0]["Condition"]["ArnLike"]["aws:SourceArn"]
+    assert isinstance(arn_like, dict) and "Fn::Join" in arn_like
+    joined = "".join(p for p in arn_like["Fn::Join"][1] if isinstance(p, str))
+    assert joined.endswith(":schedule/grading-batch-pollers/*"), (
+        f"Trust SourceArn not scoped to batch-pollers group: {joined}"
+    )
+
+
+def test_scheduler_role_can_invoke_only_batch_poller(
+    compute_template: Template,
+) -> None:
+    """Scheduler role must invoke ONLY the batch-poller Lambda."""
+    compute_template.has_resource_properties(
+        "AWS::IAM::Policy",
+        {
+            "PolicyDocument": Match.object_like(
+                {
+                    "Statement": Match.array_with(
+                        [
+                            Match.object_like(
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "lambda:InvokeFunction",
+                                    "Resource": Match.array_with(
+                                        [
+                                            {
+                                                "Fn::GetAtt": [
+                                                    Match.string_like_regexp(
+                                                        "BatchPollerLambda"
+                                                    ),
+                                                    "Arn",
+                                                ]
+                                            }
+                                        ]
+                                    ),
+                                }
+                            )
+                        ]
+                    )
+                }
+            ),
+            "Roles": Match.array_with(
+                [{"Ref": Match.string_like_regexp("BatchPollerSchedulerRole")}]
+            ),
+        },
+    )
+
+
+# ── exam-api task role: scheduler API + PassRole ────────────────────────────
+
+
+def test_exam_api_can_manage_schedules_in_batch_pollers_group(
+    compute_template: Template,
+) -> None:
+    compute_template.has_resource_properties(
+        "AWS::IAM::Policy",
+        {
+            "PolicyDocument": Match.object_like(
+                {
+                    "Statement": Match.array_with(
+                        [
+                            Match.object_like(
+                                {
+                                    "Sid": "SchedulerAccess",
+                                    "Effect": "Allow",
+                                    "Action": Match.array_with(
+                                        [
+                                            "scheduler:CreateSchedule",
+                                            "scheduler:DeleteSchedule",
+                                            "scheduler:GetSchedule",
+                                            "scheduler:UpdateSchedule",
+                                        ]
+                                    ),
+                                }
+                            )
+                        ]
+                    )
+                }
+            )
+        },
+    )
+
+
+def test_exam_api_scheduler_resource_scoped_to_batch_pollers_group(
+    compute_template: Template,
+) -> None:
+    """The resource ARN is a Fn::Join over region/account; verify the static
+    suffix narrows it to the batch-pollers group only."""
+    policies = compute_template.find_resources("AWS::IAM::Policy")
+    matched = False
+    for resource in policies.values():
+        for stmt in resource["Properties"]["PolicyDocument"]["Statement"]:
+            if stmt.get("Sid") != "SchedulerAccess":
+                continue
+            res = stmt["Resource"]
+            assert isinstance(res, dict) and "Fn::Join" in res, (
+                "Expected Fn::Join ARN for scheduler resource"
+            )
+            joined = "".join(p for p in res["Fn::Join"][1] if isinstance(p, str))
+            assert joined.endswith(":schedule/grading-batch-pollers/*"), (
+                f"Resource not scoped to batch-pollers group: {joined}"
+            )
+            matched = True
+    assert matched, "SchedulerAccess statement not found"
+
+
+def test_exam_api_passrole_scoped_to_scheduler_service(
+    compute_template: Template,
+) -> None:
+    """PassRole must target ONLY the batch-poller scheduler role and be
+    conditioned on the scheduler service. Widening the resource to "*" or
+    naming any other role must fail this test."""
+    policies = compute_template.find_resources("AWS::IAM::Policy")
+    matched = False
+    for resource in policies.values():
+        for stmt in resource["Properties"]["PolicyDocument"]["Statement"]:
+            if stmt.get("Sid") != "SchedulerPassRole":
+                continue
+            assert stmt["Effect"] == "Allow"
+            assert stmt["Action"] == "iam:PassRole"
+            assert stmt["Condition"] == {
+                "StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}
+            }
+            res = stmt["Resource"]
+            assert isinstance(res, dict) and "Fn::GetAtt" in res, (
+                f"Resource must be a single GetAtt on the scheduler role, got {res!r}"
+            )
+            referenced_logical_id, attr = res["Fn::GetAtt"]
+            assert "BatchPollerSchedulerRole" in referenced_logical_id, (
+                f"Expected scheduler role, got {referenced_logical_id}"
+            )
+            assert attr == "Arn"
+            matched = True
+    assert matched, "SchedulerPassRole statement not found"
+
+
+# ── SSM parameters for runtime wiring ───────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "param_name",
+    [
+        "/grading/lambda/batch-poller-arn",
+        "/grading/scheduler/batch-pollers-group-name",
+        "/grading/scheduler/batch-poller-role-arn",
+    ],
+)
+def test_runtime_wiring_published_to_ssm(
+    compute_template: Template, param_name: str
+) -> None:
+    compute_template.has_resource_properties(
+        "AWS::SSM::Parameter",
+        {"Name": param_name, "Type": "String"},
+    )
+
+
+def test_batch_pollers_group_name_param_is_literal(
+    compute_template: Template,
+) -> None:
+    """The group-name SSM parameter holds the plain string, not a CFN ref —
+    exam-api reads it as a literal name."""
+    compute_template.has_resource_properties(
+        "AWS::SSM::Parameter",
+        {
+            "Name": "/grading/scheduler/batch-pollers-group-name",
+            "Value": "grading-batch-pollers",
+        },
+    )

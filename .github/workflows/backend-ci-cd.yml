@@ -111,11 +111,12 @@ jobs:
           (cd infra && uv sync --all-groups && uv run pytest tests/)
 
   cdk-synth:
-    name: CDK synth
+    name: CDK synth & diff
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
+      pull-requests: write
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
       AWS_OIDC_ROLE_ARN: ${{ vars.AWS_OIDC_ROLE_ARN }}
@@ -160,3 +161,48 @@ jobs:
       - name: Run CDK synth
         working-directory: infra
         run: uv run cdk synth --no-lookups
+
+      - name: Run CDK diff
+        if: github.event_name == 'pull_request'
+        id: cdk-diff
+        working-directory: infra
+        run: |
+          set +e
+          uv run cdk diff --no-lookups --no-color > diff.txt 2>&1
+          status=$?
+          echo "exitcode=${status}" >> "$GITHUB_OUTPUT"
+          cat diff.txt
+          # cdk diff exits 1 when differences exist — that's expected on PRs.
+          if [ "${status}" -gt 1 ]; then exit "${status}"; fi
+
+      - name: Post CDK diff as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          DIFF_EXIT: ${{ steps.cdk-diff.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cdk-diff -->';
+            const max = 60_000;
+            let raw = fs.readFileSync('infra/diff.txt', 'utf8');
+            if (raw.length > max) {
+              raw = raw.slice(0, max) + '\n... (truncated)';
+            }
+            const exit = process.env.DIFF_EXIT || '?';
+            const header = exit === '0'
+              ? 'No infrastructure changes.'
+              : 'Infrastructure changes detected.';
+            const body = `${marker}\n## CDK diff\n\n${header}\n\n<details><summary>Full output</summary>\n\n\`\`\`\n${raw}\n\`\`\`\n\n</details>`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const existing = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 },
+            );
+            const previous = existing.find(c => c.body && c.body.startsWith(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

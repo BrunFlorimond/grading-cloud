@@ -14,9 +14,11 @@ create_queue_with_dlq() {
   local visibility_timeout="$3"
   local max_receive_count="$4"
 
+  local dlq_attrs_file="/tmp/${dlq_name}.attrs.json"
+  printf '{"MessageRetentionPeriod":"1209600"}' >"${dlq_attrs_file}"
   awslocal sqs create-queue \
     --queue-name "${dlq_name}" \
-    --attributes "MessageRetentionPeriod=1209600" \
+    --attributes "file://${dlq_attrs_file}" \
     >/dev/null
 
   local dlq_url
@@ -28,12 +30,19 @@ create_queue_with_dlq() {
     --query 'Attributes.QueueArn' \
     --output text)
 
-  local redrive
-  redrive=$(printf '{"deadLetterTargetArn":"%s","maxReceiveCount":"%s"}' "${dlq_arn}" "${max_receive_count}")
+  # AWS CLI requires RedrivePolicy as a JSON-encoded string inside the attrs JSON.
+  # Build the inner JSON, then embed it (escaped) as a string value.
+  local redrive_json
+  redrive_json=$(printf '{"deadLetterTargetArn":"%s","maxReceiveCount":"%s"}' \
+    "${dlq_arn}" "${max_receive_count}")
+  local redrive_escaped="${redrive_json//\"/\\\"}"
 
+  local main_attrs_file="/tmp/${main_name}.attrs.json"
+  printf '{"VisibilityTimeout":"%s","MessageRetentionPeriod":"345600","RedrivePolicy":"%s"}' \
+    "${visibility_timeout}" "${redrive_escaped}" >"${main_attrs_file}"
   awslocal sqs create-queue \
     --queue-name "${main_name}" \
-    --attributes "VisibilityTimeout=${visibility_timeout},MessageRetentionPeriod=345600,RedrivePolicy=${redrive}" \
+    --attributes "file://${main_attrs_file}" \
     >/dev/null
 }
 

@@ -8,6 +8,7 @@ FROM_EMAIL="no-reply@local.grading-cloud"
 BATCH_POLLERS_GROUP_NAME="grading-batch-pollers"
 BATCH_POLLER_FUNCTION_NAME="grading-batch-poller"
 SCHEDULER_ROLE_NAME="grading-batch-poller-scheduler-role"
+BATCH_POLLER_EXECUTION_ROLE_NAME="grading-batch-poller-execution-role"
 
 awslocal s3 mb "s3://${BUCKET_NAME}" >/dev/null
 awslocal ses verify-email-identity --email-address "${FROM_EMAIL}" >/dev/null
@@ -87,6 +88,27 @@ SCHEDULER_ROLE_ARN=$(awslocal iam get-role \
   --role-name "${SCHEDULER_ROLE_NAME}" \
   --query 'Role.Arn' --output text)
 
+# Lambda execution role — distinct from the scheduler role above. Trust must
+# allow lambda.amazonaws.com (real AWS rejects mismatched principals; LocalStack
+# is permissive but we keep parity with prod).
+LAMBDA_TRUST_POLICY='{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Service": "lambda.amazonaws.com"},
+    "Action": "sts:AssumeRole"
+  }]
+}'
+
+awslocal iam create-role \
+  --role-name "${BATCH_POLLER_EXECUTION_ROLE_NAME}" \
+  --assume-role-policy-document "${LAMBDA_TRUST_POLICY}" \
+  >/dev/null 2>&1 || true
+
+BATCH_POLLER_EXECUTION_ROLE_ARN=$(awslocal iam get-role \
+  --role-name "${BATCH_POLLER_EXECUTION_ROLE_NAME}" \
+  --query 'Role.Arn' --output text)
+
 # Minimal handler.py packaged into a zip in /tmp.
 mkdir -p /tmp/batch-poller-stub
 cat >/tmp/batch-poller-stub/handler.py <<'PY'
@@ -99,7 +121,7 @@ awslocal lambda create-function \
   --function-name "${BATCH_POLLER_FUNCTION_NAME}" \
   --runtime python3.12 \
   --handler handler.handler \
-  --role "${SCHEDULER_ROLE_ARN}" \
+  --role "${BATCH_POLLER_EXECUTION_ROLE_ARN}" \
   --zip-file fileb:///tmp/batch-poller-stub.zip \
   --memory-size 256 \
   --timeout 60 \

@@ -299,9 +299,10 @@ class ComputeStack(Stack):
         )
         # Scoped grant — no wildcard; adds GetSecretValue + DescribeSecret on this ARN
         db_secret.grant_read(task_role)
+        # exam-api is BOTH producer and consumer of pipeline-events.
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
-                sid="SqsAccess",
+                sid="SqsPipelineEventsConsumer",
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "sqs:ChangeMessageVisibility",
@@ -311,13 +312,19 @@ class ComputeStack(Stack):
                     "sqs:ReceiveMessage",
                     "sqs:SendMessage",
                 ],
+                resources=[pipeline_events_queue.queue_arn],
+            )
+        )
+        # Spreadsheet/PDF queues are consumed by Lambdas (Issue #5);
+        # exam-api only publishes work onto them.
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SqsProducer",
+                effect=iam.Effect.ALLOW,
+                actions=["sqs:SendMessage"],
                 resources=[
-                    pipeline_events_queue.queue_arn,
-                    pipeline_dlq.queue_arn,
                     spreadsheet_conversion_queue.queue_arn,
-                    spreadsheet_conversion_dlq.queue_arn,
                     pdf_generation_queue.queue_arn,
-                    pdf_generation_dlq.queue_arn,
                 ],
             )
         )

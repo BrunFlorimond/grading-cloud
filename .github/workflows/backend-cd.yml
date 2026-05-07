@@ -112,6 +112,13 @@ jobs:
       - name: Install infra dependencies
         run: uv sync --directory infra
 
+      - name: Resolve CDK environment
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "CDK_DEFAULT_ACCOUNT=${account}" >> "$GITHUB_ENV"
+          echo "CDK_DEFAULT_REGION=${AWS_REGION}" >> "$GITHUB_ENV"
+
       - name: CDK deploy
         working-directory: infra
         env:

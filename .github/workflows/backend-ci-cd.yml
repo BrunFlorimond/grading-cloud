@@ -158,6 +158,14 @@ jobs:
       - name: Install infra dependencies
         run: uv sync --directory infra
 
+      - name: Resolve CDK environment
+        if: env.AWS_OIDC_ROLE_ARN != ''
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "CDK_DEFAULT_ACCOUNT=${account}" >> "$GITHUB_ENV"
+          echo "CDK_DEFAULT_REGION=${AWS_REGION}" >> "$GITHUB_ENV"
+
       - name: Run CDK synth
         working-directory: infra
         run: uv run cdk synth

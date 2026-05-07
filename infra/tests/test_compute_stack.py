@@ -369,6 +369,9 @@ def test_no_individual_schedules_provisioned(compute_template: Template) -> None
 
 
 def test_scheduler_role_trusts_scheduler_service(compute_template: Template) -> None:
+    """Trust policy must scope to scheduler.amazonaws.com AND constrain both
+    aws:SourceAccount and aws:SourceArn (confused-deputy hardening). Without
+    SourceArn, any schedule in any group could assume this role."""
     compute_template.has_resource_properties(
         "AWS::IAM::Role",
         {
@@ -384,11 +387,18 @@ def test_scheduler_role_trusts_scheduler_service(compute_template: Template) -> 
                                     "Principal": {
                                         "Service": "scheduler.amazonaws.com"
                                     },
-                                    "Condition": {
-                                        "StringEquals": Match.object_like(
-                                            {"aws:SourceAccount": Match.any_value()}
-                                        )
-                                    },
+                                    "Condition": Match.object_like(
+                                        {
+                                            "StringEquals": Match.object_like(
+                                                {
+                                                    "aws:SourceAccount": Match.any_value()
+                                                }
+                                            ),
+                                            "ArnLike": Match.object_like(
+                                                {"aws:SourceArn": Match.any_value()}
+                                            ),
+                                        }
+                                    ),
                                 }
                             )
                         ]
@@ -396,6 +406,31 @@ def test_scheduler_role_trusts_scheduler_service(compute_template: Template) -> 
                 }
             ),
         },
+    )
+
+
+def test_scheduler_role_source_arn_scoped_to_batch_pollers_group(
+    compute_template: Template,
+) -> None:
+    """The aws:SourceArn condition must end with the batch-pollers group ARN
+    suffix — nothing wider should be acceptable."""
+    roles = compute_template.find_resources(
+        "AWS::IAM::Role",
+        {
+            "Properties": Match.object_like(
+                {"RoleName": "grading-batch-poller-scheduler-role"}
+            )
+        },
+    )
+    assert len(roles) == 1
+    statements = next(iter(roles.values()))["Properties"][
+        "AssumeRolePolicyDocument"
+    ]["Statement"]
+    arn_like = statements[0]["Condition"]["ArnLike"]["aws:SourceArn"]
+    assert isinstance(arn_like, dict) and "Fn::Join" in arn_like
+    joined = "".join(p for p in arn_like["Fn::Join"][1] if isinstance(p, str))
+    assert joined.endswith(":schedule/grading-batch-pollers/*"), (
+        f"Trust SourceArn not scoped to batch-pollers group: {joined}"
     )
 
 
@@ -500,33 +535,31 @@ def test_exam_api_scheduler_resource_scoped_to_batch_pollers_group(
 def test_exam_api_passrole_scoped_to_scheduler_service(
     compute_template: Template,
 ) -> None:
-    compute_template.has_resource_properties(
-        "AWS::IAM::Policy",
-        {
-            "PolicyDocument": Match.object_like(
-                {
-                    "Statement": Match.array_with(
-                        [
-                            Match.object_like(
-                                {
-                                    "Sid": "SchedulerPassRole",
-                                    "Effect": "Allow",
-                                    "Action": "iam:PassRole",
-                                    "Condition": {
-                                        "StringEquals": {
-                                            "iam:PassedToService": (
-                                                "scheduler.amazonaws.com"
-                                            )
-                                        }
-                                    },
-                                }
-                            )
-                        ]
-                    )
-                }
+    """PassRole must target ONLY the batch-poller scheduler role and be
+    conditioned on the scheduler service. Widening the resource to "*" or
+    naming any other role must fail this test."""
+    policies = compute_template.find_resources("AWS::IAM::Policy")
+    matched = False
+    for resource in policies.values():
+        for stmt in resource["Properties"]["PolicyDocument"]["Statement"]:
+            if stmt.get("Sid") != "SchedulerPassRole":
+                continue
+            assert stmt["Effect"] == "Allow"
+            assert stmt["Action"] == "iam:PassRole"
+            assert stmt["Condition"] == {
+                "StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}
+            }
+            res = stmt["Resource"]
+            assert isinstance(res, dict) and "Fn::GetAtt" in res, (
+                f"Resource must be a single GetAtt on the scheduler role, got {res!r}"
             )
-        },
-    )
+            referenced_logical_id, attr = res["Fn::GetAtt"]
+            assert "BatchPollerSchedulerRole" in referenced_logical_id, (
+                f"Expected scheduler role, got {referenced_logical_id}"
+            )
+            assert attr == "Arn"
+            matched = True
+    assert matched, "SchedulerPassRole statement not found"
 
 
 # ── SSM parameters for runtime wiring ───────────────────────────────────────

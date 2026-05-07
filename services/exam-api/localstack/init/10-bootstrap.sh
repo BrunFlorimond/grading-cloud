@@ -2,7 +2,6 @@
 set -euo pipefail
 
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-eu-west-1}}"
-ACCOUNT_ID="000000000000"
 BUCKET_NAME="grading-cloud-local-exam-config"
 FROM_EMAIL="no-reply@local.grading-cloud"
 BATCH_POLLERS_GROUP_NAME="grading-batch-pollers"

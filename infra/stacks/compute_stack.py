@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, CfnParameter, Duration, Stack
+from aws_cdk import CfnOutput, CfnParameter, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
@@ -192,23 +192,29 @@ class ComputeStack(Stack):
         # ── Lambdas ──────────────────────────────────────────────────────────
         # Explicit log groups (the deprecated `log_retention=` shim spawns a
         # custom-resource Lambda; pre-creating the group is the modern path).
+        # removal_policy=DESTROY so `cdk destroy` cleans up the groups; without
+        # it, the default RETAIN orphans them and a subsequent `cdk deploy`
+        # fails on "ResourceAlreadyExists".
         spreadsheet_converter_log_group = logs.LogGroup(
             self,
             "SpreadsheetConverterLogGroup",
             log_group_name="/aws/lambda/grading-spreadsheet-converter",
             retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
         )
         pdf_generator_log_group = logs.LogGroup(
             self,
             "PdfGeneratorLogGroup",
             log_group_name="/aws/lambda/grading-pdf-generator",
             retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
         )
         batch_poller_log_group = logs.LogGroup(
             self,
             "BatchPollerLogGroup",
             log_group_name="/aws/lambda/grading-batch-poller",
             retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
         )
 
         # Container image Lambda — consumes spreadsheet-conversion queue.
@@ -288,6 +294,14 @@ class ComputeStack(Stack):
 
         # Role assumed by EventBridge Scheduler when invoking the batch-poller
         # Lambda. exam-api passes this ARN as the `RoleArn` on each schedule.
+        # SourceAccount + SourceArn scope the trust to schedules created in our
+        # account AND inside the batch-pollers group only — defends against the
+        # confused-deputy pattern where another account/group could trick
+        # Scheduler into assuming this role.
+        batch_pollers_group_arn = (
+            f"arn:aws:scheduler:{self.region}:{self.account}"
+            f":schedule/{BATCH_POLLERS_SCHEDULE_GROUP_NAME}/*"
+        )
         batch_poller_scheduler_role = iam.Role(
             self,
             "BatchPollerSchedulerRole",
@@ -296,6 +310,7 @@ class ComputeStack(Stack):
                 "scheduler.amazonaws.com",
                 conditions={
                     "StringEquals": {"aws:SourceAccount": self.account},
+                    "ArnLike": {"aws:SourceArn": batch_pollers_group_arn},
                 },
             ),
             description=(

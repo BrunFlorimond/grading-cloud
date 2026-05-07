@@ -22,7 +22,7 @@ services:
     container_name: exam-api-localstack
     restart: unless-stopped
     environment:
-      SERVICES: s3,ses,secretsmanager,sqs
+      SERVICES: s3,ses,secretsmanager,sqs,ssm,scheduler,iam,lambda
       AWS_DEFAULT_REGION: eu-west-1
       DEBUG: "0"
     ports:

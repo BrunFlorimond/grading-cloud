@@ -1,4 +1,5 @@
 from aws_cdk import CfnOutput, CfnParameter, Duration, Stack
+from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -9,6 +10,7 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_sqs as sqs
+from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 
@@ -82,6 +84,94 @@ class ComputeStack(Stack):
                 max_receive_count=5, queue=pipeline_dlq
             ),
             enforce_ssl=True,
+        )
+
+        spreadsheet_conversion_dlq = sqs.Queue(
+            self,
+            "SpreadsheetConversionDlq",
+            queue_name="grading-spreadsheet-conversion-dlq",
+            retention_period=Duration.days(14),
+            enforce_ssl=True,
+        )
+        spreadsheet_conversion_queue = sqs.Queue(
+            self,
+            "SpreadsheetConversionQueue",
+            queue_name="grading-spreadsheet-conversion",
+            retention_period=Duration.days(4),
+            visibility_timeout=Duration.seconds(300),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=3, queue=spreadsheet_conversion_dlq
+            ),
+            enforce_ssl=True,
+        )
+
+        pdf_generation_dlq = sqs.Queue(
+            self,
+            "PdfGenerationDlq",
+            queue_name="grading-pdf-generation-dlq",
+            retention_period=Duration.days(14),
+            enforce_ssl=True,
+        )
+        pdf_generation_queue = sqs.Queue(
+            self,
+            "PdfGenerationQueue",
+            queue_name="grading-pdf-generation",
+            retention_period=Duration.days(4),
+            visibility_timeout=Duration.seconds(300),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=3, queue=pdf_generation_dlq
+            ),
+            enforce_ssl=True,
+        )
+
+        # CloudWatch alarms — fire when any message lands in a DLQ
+        for alarm_id, alarm_name, dlq in (
+            (
+                "PipelineEventsDlqAlarm",
+                "grading-pipeline-events-dlq-not-empty",
+                pipeline_dlq,
+            ),
+            (
+                "SpreadsheetConversionDlqAlarm",
+                "grading-spreadsheet-conversion-dlq-not-empty",
+                spreadsheet_conversion_dlq,
+            ),
+            (
+                "PdfGenerationDlqAlarm",
+                "grading-pdf-generation-dlq-not-empty",
+                pdf_generation_dlq,
+            ),
+        ):
+            cloudwatch.Alarm(
+                self,
+                alarm_id,
+                alarm_name=alarm_name,
+                metric=dlq.metric_approximate_number_of_messages_visible(),
+                evaluation_periods=1,
+                threshold=0,
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+                alarm_description=f"A message has landed in {dlq.queue_name}.",
+            )
+
+        # SSM parameters — queue URLs for downstream services
+        ssm.StringParameter(
+            self,
+            "PipelineEventsQueueUrlParam",
+            parameter_name="/grading/messaging/pipeline-events-queue-url",
+            string_value=pipeline_events_queue.queue_url,
+        )
+        ssm.StringParameter(
+            self,
+            "SpreadsheetConversionQueueUrlParam",
+            parameter_name="/grading/messaging/spreadsheet-conversion-queue-url",
+            string_value=spreadsheet_conversion_queue.queue_url,
+        )
+        ssm.StringParameter(
+            self,
+            "PdfGenerationQueueUrlParam",
+            parameter_name="/grading/messaging/pdf-generation-queue-url",
+            string_value=pdf_generation_queue.queue_url,
         )
 
         # ── EventBridge ──────────────────────────────────────────────────────
@@ -209,9 +299,10 @@ class ComputeStack(Stack):
         )
         # Scoped grant — no wildcard; adds GetSecretValue + DescribeSecret on this ARN
         db_secret.grant_read(task_role)
+        # exam-api is BOTH producer and consumer of pipeline-events.
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
-                sid="SqsAccess",
+                sid="SqsPipelineEventsConsumer",
                 effect=iam.Effect.ALLOW,
                 actions=[
                     "sqs:ChangeMessageVisibility",
@@ -221,7 +312,20 @@ class ComputeStack(Stack):
                     "sqs:ReceiveMessage",
                     "sqs:SendMessage",
                 ],
-                resources=[pipeline_events_queue.queue_arn, pipeline_dlq.queue_arn],
+                resources=[pipeline_events_queue.queue_arn],
+            )
+        )
+        # Spreadsheet/PDF queues are consumed by Lambdas (Issue #5);
+        # exam-api only publishes work onto them.
+        task_role.add_to_principal_policy(
+            iam.PolicyStatement(
+                sid="SqsProducer",
+                effect=iam.Effect.ALLOW,
+                actions=["sqs:SendMessage"],
+                resources=[
+                    spreadsheet_conversion_queue.queue_arn,
+                    pdf_generation_queue.queue_arn,
+                ],
             )
         )
         task_role.add_to_principal_policy(

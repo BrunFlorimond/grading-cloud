@@ -135,7 +135,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Validate OIDC role configuration
         run: |
@@ -160,7 +160,7 @@ jobs:
 
       - name: Run CDK synth
         working-directory: infra
-        run: uv run cdk synth --no-lookups
+        run: uv run cdk synth
 
       - name: Run CDK diff
         if: github.event_name == 'pull_request'
@@ -168,7 +168,7 @@ jobs:
         working-directory: infra
         run: |
           set +e
-          uv run cdk diff --no-lookups --no-color > diff.txt 2>&1
+          uv run cdk diff --no-color > diff.txt 2>&1
           status=$?
           echo "exitcode=${status}" >> "$GITHUB_OUTPUT"
           cat diff.txt

@@ -16,7 +16,7 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
-  AWS_OIDC_ROLE_ARN: ${{ vars.AWS_OIDC_ROLE_ARN }}
+  CI_AWS_OIDC_ROLE_ARN: ${{ vars.CI_AWS_OIDC_ROLE_ARN }}
   RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
 
 # Lambda services (spreadsheet-converter, pdf-generator, batch-poller) are not
@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          [ -n "${AWS_OIDC_ROLE_ARN}" ] || missing+=("vars.AWS_OIDC_ROLE_ARN")
+          [ -n "${CI_AWS_OIDC_ROLE_ARN}" ] || missing+=("vars.CI_AWS_OIDC_ROLE_ARN")
           [ -n "${{ vars.SES_FROM_ADDRESS }}" ] || missing+=("vars.SES_FROM_ADDRESS")
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Missing required repository variable(s): %s\n' "${missing[*]}"
@@ -52,7 +52,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_OIDC_ROLE_ARN }}
+          role-to-assume: ${{ env.CI_AWS_OIDC_ROLE_ARN }}
           role-session-name: github-actions-cd-build
           aws-region: ${{ env.AWS_REGION }}
 
@@ -102,7 +102,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_OIDC_ROLE_ARN }}
+          role-to-assume: ${{ env.CI_AWS_OIDC_ROLE_ARN }}
           role-session-name: github-actions-cd-deploy
           aws-region: ${{ env.AWS_REGION }}
 
@@ -136,7 +136,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_OIDC_ROLE_ARN }}
+          role-to-assume: ${{ env.CI_AWS_OIDC_ROLE_ARN }}
           role-session-name: github-actions-cd-fargate
           aws-region: ${{ env.AWS_REGION }}
 

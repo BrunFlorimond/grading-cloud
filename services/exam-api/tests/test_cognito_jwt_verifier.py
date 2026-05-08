@@ -40,7 +40,8 @@ async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
         return_value={
             "sub": "teacher-1",
             "cognito:groups": ["teachers"],
-            "token_use": "id",
+            "token_use": "access",
+            "client_id": "app-client-id",
         }
     )
     monkeypatch.setattr(
@@ -83,7 +84,7 @@ async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
 
 
 @pytest.mark.asyncio
-async def test_decode_and_verify_token_rejects_non_id_token(
+async def test_decode_and_verify_token_accepts_access_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier = CognitoJwtVerifier(
@@ -124,10 +125,122 @@ async def test_decode_and_verify_token_rejects_non_id_token(
     )
     monkeypatch.setattr(
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
-        lambda *args, **kwargs: {"token_use": "access"},
+        lambda *args, **kwargs: {
+            "token_use": "access",
+            "client_id": "app-client-id",
+            "sub": "teacher-1",
+        },
     )
 
-    with pytest.raises(JWTError, match="Expected Cognito ID token"):
+    claims = await verifier.decode_and_verify_token("header.payload.signature")
+    assert claims["token_use"] == "access"
+
+
+@pytest.mark.asyncio
+async def test_decode_and_verify_token_rejects_id_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-1"},
+    )
+    mock_response = _FakeResponse(
+        {
+            "keys": [
+                {
+                    "kid": "kid-1",
+                    "kty": "RSA",
+                    "alg": "RS256",
+                    "use": "sig",
+                    "n": "abc",
+                    "e": "AQAB",
+                }
+            ]
+        }
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
+        lambda *args, **kwargs: {
+            "token_use": "id",
+            "aud": "app-client-id",
+            "sub": "teacher-1",
+        },
+    )
+
+    with pytest.raises(JWTError, match="Expected Cognito access token"):
+        await verifier.decode_and_verify_token("header.payload.signature")
+
+
+@pytest.mark.asyncio
+async def test_decode_and_verify_token_rejects_mismatched_client_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = CognitoJwtVerifier(
+        issuer="https://issuer.example.com/pool",
+        audience="app-client-id",
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.get_unverified_header",
+        lambda token: {"kid": "kid-1"},
+    )
+    mock_response = _FakeResponse(
+        {
+            "keys": [
+                {
+                    "kid": "kid-1",
+                    "kty": "RSA",
+                    "alg": "RS256",
+                    "use": "sig",
+                    "n": "abc",
+                    "e": "AQAB",
+                }
+            ]
+        }
+    )
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    class _CM:
+        async def __aenter__(self) -> AsyncMock:
+            return mock_client
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.httpx.AsyncClient",
+        lambda **kwargs: _CM(),
+    )
+    monkeypatch.setattr(
+        "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
+        lambda *args, **kwargs: {
+            "token_use": "access",
+            "client_id": "wrong-id",
+            "sub": "teacher-1",
+        },
+    )
+
+    with pytest.raises(
+        JWTError, match="Cognito access token client_id does not match app client id"
+    ):
         await verifier.decode_and_verify_token("header.payload.signature")
 
 
@@ -178,7 +291,8 @@ async def test_jwks_refresh_called_once_for_concurrent_unknown_kid(
     decode_mock = Mock(
         return_value={
             "sub": "u",
-            "token_use": "id",
+            "token_use": "access",
+            "client_id": "app-client-id",
         }
     )
     monkeypatch.setattr(

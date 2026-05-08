@@ -1,4 +1,4 @@
-"""JWT signature verifier for Cognito ID tokens."""
+"""JWT signature verifier for Cognito access tokens used as Bearer."""
 
 from __future__ import annotations
 
@@ -52,12 +52,15 @@ class CognitoJwtVerifier:
             token,
             key,
             algorithms=["RS256"],
-            audience=self._audience,
             issuer=self._issuer,
+            options={"verify_aud": False},
         )
         token_use = claims.get("token_use")
-        if token_use != "id":
-            raise JWTError("Expected Cognito ID token.")
+        if token_use != "access":
+            raise JWTError("Expected Cognito access token.")
+        client_id = claims.get("client_id")
+        if client_id != self._audience:
+            raise JWTError("Cognito access token client_id does not match app client id.")
         return claims
 
     async def _refresh_jwks(self) -> None:

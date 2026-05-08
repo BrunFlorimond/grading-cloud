@@ -120,9 +120,9 @@ Teacher Can Invite Student And Student Scope Is Accessible
     ${student_login_response}=    POST On Session    exam_api    /auth/student-login    json=${student_login_payload}    expected_status=any
     Should Be Equal As Integers    ${student_login_response.status_code}    200
     ${student_login_body}=    Evaluate    $student_login_response.json()
-    Should Not Be Empty    ${student_login_body["id_token"]}
+    Should Not Be Empty    ${student_login_body["access_token"]}
 
-    ${student_headers}=    Create Dictionary    Authorization=Bearer ${student_login_body["id_token"]}
+    ${student_headers}=    Create Dictionary    Authorization=Bearer ${student_login_body["access_token"]}
     ${scope_response}=    GET On Session    exam_api    /exams/${EXAM_ID}/students/${student_id}/scope    headers=${student_headers}    expected_status=any
     Should Be Equal As Integers    ${scope_response.status_code}    200
     ${scope_body}=    Evaluate    $scope_response.json()
@@ -139,7 +139,7 @@ Prepare Authenticated Context
     ${admin_login_response}=    POST On Session    exam_api    /auth/login    json=${admin_payload}    expected_status=any
     Should Be Equal As Integers    ${admin_login_response.status_code}    200
     ${admin_login_body}=    Evaluate    $admin_login_response.json()
-    ${admin_token}=    Set Variable    ${admin_login_body["id_token"]}
+    ${admin_token}=    Set Variable    ${admin_login_body["access_token"]}
     ${admin_headers}=    Create Dictionary    Authorization=Bearer ${admin_token}
     Set Suite Variable    ${ADMIN_HEADERS}    ${admin_headers}
 
@@ -157,7 +157,7 @@ Prepare Authenticated Context
     ${teacher_login_response}=    POST On Session    exam_api    /auth/login    json=${teacher_login_payload}    expected_status=any
     Should Be Equal As Integers    ${teacher_login_response.status_code}    200
     ${teacher_login_body}=    Evaluate    $teacher_login_response.json()
-    ${teacher_token}=    Set Variable    ${teacher_login_body["id_token"]}
+    ${teacher_token}=    Set Variable    ${teacher_login_body["access_token"]}
     ${teacher_headers}=    Create Dictionary    Authorization=Bearer ${teacher_token}
     Set Suite Variable    ${TEACHER_HEADERS}    ${teacher_headers}
 

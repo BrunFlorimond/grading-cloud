@@ -73,6 +73,7 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    access_token: str
     id_token: str
     refresh_token: str
     expires_in: int
@@ -162,6 +163,7 @@ async def login(
         ) from err
 
     return LoginResponse(
+        access_token=result.tokens.access_token,
         id_token=result.tokens.id_token,
         refresh_token=result.tokens.refresh_token,
         expires_in=result.tokens.expires_in,
@@ -177,6 +179,7 @@ class StudentLoginResponse(BaseModel):
     """Response for POST /auth/student-login (tokens or NEW_PASSWORD_REQUIRED challenge)."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
+    access_token: str | None = None
     id_token: str | None = None
     refresh_token: str | None = None
     expires_in: int | None = None
@@ -207,6 +210,7 @@ class ChangePasswordRequest(BaseModel):
 
 class ChangePasswordResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    access_token: str
     id_token: str
     refresh_token: str
     expires_in: int
@@ -252,6 +256,7 @@ async def student_login(
     if tokens is None:
         raise RuntimeError("Login outcome missing tokens despite absent challenge.")
     return StudentLoginResponse(
+        access_token=tokens.access_token,
         id_token=tokens.id_token,
         refresh_token=tokens.refresh_token,
         expires_in=tokens.expires_in,
@@ -292,6 +297,7 @@ async def change_password(
         ) from err
 
     return ChangePasswordResponse(
+        access_token=result.tokens.access_token,
         id_token=result.tokens.id_token,
         refresh_token=result.tokens.refresh_token,
         expires_in=result.tokens.expires_in,

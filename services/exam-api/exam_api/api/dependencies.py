@@ -110,7 +110,7 @@ async def require_teacher(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentTeacher:
-    """Dependency: ID token must include cognito:groups containing the teachers pool group."""
+    """Dependency: access token must include cognito:groups containing teachers group."""
 
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
@@ -140,7 +140,7 @@ async def require_student(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentStudent:
-    """Dependency: ID token must include cognito:groups containing the students pool group."""
+    """Dependency: access token must include cognito:groups containing students group."""
 
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
@@ -170,7 +170,7 @@ async def require_admin(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentAdmin:
-    """Dependency: ID token must include cognito:groups containing the `admin` pool group."""
+    """Dependency: access token must include cognito:groups containing `admin` group."""
     token = _bearer_token(authorization)
     jwt_verifier = _get_jwt_verifier(request)
     claims = await _decode_token(token, jwt_verifier)

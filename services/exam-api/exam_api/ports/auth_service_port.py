@@ -10,6 +10,7 @@ from grading_shared.domain.models import StrictModel
 class AuthTokens(StrictModel):
     """Authentication token bundle returned by Cognito login."""
 
+    access_token: str
     id_token: str
     refresh_token: str
     expires_in: int

@@ -68,6 +68,7 @@ def test_login_endpoint_uses_async_execute(auth_client: TestClient) -> None:
     mock_use_case.execute = AsyncMock(
         return_value=LoginTeacherResult(
             tokens=AuthTokens(
+                access_token="access",
                 id_token="id",
                 refresh_token="ref",
                 expires_in=3600,

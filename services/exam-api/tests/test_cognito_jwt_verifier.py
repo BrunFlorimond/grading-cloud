@@ -41,6 +41,7 @@ async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
             "sub": "teacher-1",
             "cognito:groups": ["teachers"],
             "token_use": "id",
+            "aud": "app-client-id",
         }
     )
     monkeypatch.setattr(
@@ -83,7 +84,7 @@ async def test_decode_and_verify_token_refreshes_jwks_for_unknown_kid(
 
 
 @pytest.mark.asyncio
-async def test_decode_and_verify_token_rejects_non_id_token(
+async def test_decode_and_verify_token_accepts_access_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verifier = CognitoJwtVerifier(
@@ -124,11 +125,15 @@ async def test_decode_and_verify_token_rejects_non_id_token(
     )
     monkeypatch.setattr(
         "exam_api.infrastructure.cognito_jwt_verifier.jwt.decode",
-        lambda *args, **kwargs: {"token_use": "access"},
+        lambda *args, **kwargs: {
+            "token_use": "access",
+            "client_id": "app-client-id",
+            "sub": "teacher-1",
+        },
     )
 
-    with pytest.raises(JWTError, match="Expected Cognito ID token"):
-        await verifier.decode_and_verify_token("header.payload.signature")
+    claims = await verifier.decode_and_verify_token("header.payload.signature")
+    assert claims["token_use"] == "access"
 
 
 @pytest.mark.asyncio
@@ -179,6 +184,7 @@ async def test_jwks_refresh_called_once_for_concurrent_unknown_kid(
         return_value={
             "sub": "u",
             "token_use": "id",
+            "aud": "app-client-id",
         }
     )
     monkeypatch.setattr(

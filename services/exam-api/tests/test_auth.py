@@ -171,6 +171,7 @@ async def test_login_returns_auth_tokens() -> None:
     auth = Mock()
     auth.login_teacher = AsyncMock(
         return_value=AuthTokens(
+            access_token="access.jwt.token",
             id_token="id.jwt.token",
             refresh_token="refresh.token",
             expires_in=3600,
@@ -183,6 +184,7 @@ async def test_login_returns_auth_tokens() -> None:
     )
 
     assert result.tokens.id_token == "id.jwt.token"
+    assert result.tokens.access_token == "access.jwt.token"
     assert result.tokens.refresh_token == "refresh.token"
     assert result.tokens.expires_in == 3600
 
@@ -405,6 +407,7 @@ async def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
     cognito.initiate_auth = AsyncMock(
         return_value={
             "AuthenticationResult": {
+                "AccessToken": "access.jwt.token",
                 "IdToken": "id.jwt.token",
                 "RefreshToken": "refresh.token",
                 "ExpiresIn": 3600,
@@ -422,6 +425,7 @@ async def test_cognito_login_calls_initiate_auth_and_returns_tokens() -> None:
     )
 
     assert tokens == AuthTokens(
+        access_token="access.jwt.token",
         id_token="id.jwt.token",
         refresh_token="refresh.token",
         expires_in=3600,
@@ -601,6 +605,7 @@ def test_post_login_200_returns_tokens(client: TestClient) -> None:
     mock_use_case.execute = AsyncMock(
         return_value=LoginTeacherResult(
             tokens=AuthTokens(
+                access_token="access.jwt.token",
                 id_token="id.jwt.token",
                 refresh_token="refresh.token",
                 expires_in=3600,
@@ -616,6 +621,7 @@ def test_post_login_200_returns_tokens(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "access_token": "access.jwt.token",
         "id_token": "id.jwt.token",
         "refresh_token": "refresh.token",
         "expires_in": 3600,

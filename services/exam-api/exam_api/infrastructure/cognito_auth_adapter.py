@@ -318,12 +318,14 @@ class CognitoAuthAdapter(AuthServicePort):
         return self._auth_tokens_from_result(auth_result)
 
     def _auth_tokens_from_result(self, auth_result: dict[str, Any]) -> AuthTokens:
+        access_token = auth_result.get("AccessToken")
         id_token = auth_result.get("IdToken")
         refresh_token = auth_result.get("RefreshToken")
         expires_in = auth_result.get("ExpiresIn")
 
         if (
-            not isinstance(id_token, str)
+            not isinstance(access_token, str)
+            or not isinstance(id_token, str)
             or not isinstance(refresh_token, str)
             or not isinstance(expires_in, int)
         ):
@@ -332,6 +334,7 @@ class CognitoAuthAdapter(AuthServicePort):
             )
 
         return AuthTokens(
+            access_token=access_token,
             id_token=id_token,
             refresh_token=refresh_token,
             expires_in=expires_in,
